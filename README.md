@@ -2,7 +2,7 @@
 
 MVP 提供两个核心能力：读取温度传感器；在有限时长内设置风扇转速并恢复自动控制。面向 Apple Silicon，交付格式为 **DMG 内的 `MacFan.app`**，内含窗口、CLI 和所需运行时。用户不需要安装 Python，也不需要模型、API Key 或网络服务。
 
-**当前状态：已有真实 Mac 的只读安装反馈，尚无完整硬件控扇验收。** 0.2.0 修复了异常温度被标为正常、诊断数量失真和缺少告警的问题；规则与验收方式见 [温度有效性说明](docs/temperature-validation.md)。各机型的实际调速与自动恢复须按 [硬件验收清单](docs/hardware-validation.md) 验证，CI 和模拟测试不能代替。
+**0.3.0：首次授权安装 Helper，之后 Agent 无需 sudo 或重复弹窗即可控扇。** 修复 SMC 异步读回导致的调速/恢复误报。已在 Mac16,10、macOS 27.0 上验证 1600 RPM 短时调速、到期恢复、主动恢复与 CLI 被终止后的恢复；其他机型、睡眠及 Ftst 路径仍未验收。详见 [硬件验收记录](docs/hardware-validation.md) 和 [温度有效性说明](docs/temperature-validation.md)。
 
 ## 给 Agent 一句话安装
 
