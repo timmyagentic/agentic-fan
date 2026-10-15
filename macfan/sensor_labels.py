@@ -75,12 +75,12 @@ def describe(row, device):
             label('SSD 闪存 · 通道 ' + nand[1], 'storage', 'system_name',
                   '翻译系统返回的 NAND 通道名称，不等同于整盘 SMART 温度。', 'IOHID Product: ' + name)
         elif pmu:
-            area = '芯片内部' if pmu[2] == 'tdie' else '外部测点'
+            area = '芯片内部' if pmu[2] == 'tdie' else '设备测点'
             label(f'电源管理 {pmu[1]} · {area} {pmu[3]}', 'power', 'system_name',
                   'PMU 为电源管理单元；保留系统编号，未确认板上位置。', 'IOHID Product: ' + name)
         elif re.fullmatch(r'PMU\d* tcal', name):
-            label('电源管理 ' + name.split()[0] + ' · 校准读数', 'power', 'system_name',
-                  '系统标记的校准读数，默认不纳入温度概览。', 'IOHID Product: ' + name)
+            label('电源管理 ' + name.split()[0] + ' · 参考读数', 'power', 'system_name',
+                  '系统返回 tcal；用途未独立验证，不纳入温度概览。', 'IOHID Product: ' + name)
             result['exclude_from_overview'] = True
         else:
             patterns = (
