@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from datetime import datetime, timezone
 
 from .codecs import KeyInfo, decode, encode_rpm
@@ -169,19 +170,47 @@ class Hardware:
         elif self.optional_info("Ftst") and self.smc.read("Ftst") != b"\0":
             raise MacFanError("CONTROL_CONFLICT", "Global Ftst is already active. Restore the existing controller before starting a session.", 6)
 
-    def apply(self, indices: list[int], rpm: int, experimental_ftst=False):
+    def apply(self, indices: list[int], rpm: int, experimental_ftst=False, wait=None):
         # Caller must validate and hold the write lock. Its finally block owns rollback,
         # including a partial failure before this method returns.
         for index in indices:
             self._set_mode(index, True)
+            # A shared FS! bitmap must settle before the next read/modify/write.
+            if not experimental_ftst:
+                self._wait_value(lambda: self.mode(index), lambda x: x == "manual",
+                                 "CONTROL_REJECTED", wait=wait, fan=index, field="mode")
         if experimental_ftst:
             self.smc.write("Ftst", b"\1")
+            self._wait_value(lambda: self.smc.read("Ftst").hex(), lambda x: x == "01",
+                             "CONTROL_REJECTED", wait=wait, field="Ftst")
+            for index in indices:
+                self._wait_value(lambda: self.mode(index), lambda x: x == "manual",
+                                 "CONTROL_REJECTED", wait=wait, fan=index, field="mode")
         for index in indices:
             key = f"F{index}Tg"
             self.smc.write(key, encode_rpm(self.smc.info(key), rpm))
         for index in indices:
-            if self.mode(index) != "manual" or abs(self.number(f"F{index}Tg") - rpm) > 1:
+            self._wait_value(lambda: self.number(f"F{index}Tg"), lambda x: abs(x - rpm) <= 1,
+                             "CONTROL_REJECTED", wait=wait, fan=index, field="target_rpm", expected=rpm)
+            if self.mode(index) != "manual":
                 raise MacFanError("CONTROL_REJECTED", "Hardware did not retain the requested mode/target.", fan=index)
+
+    @staticmethod
+    def _wait_value(read, accepted, code, wait=None, **details):
+        # Poll readback, never blindly repeat a hardware write. The transport
+        # may acknowledge before firmware publishes the new value (Mac16,10).
+        deadline = time.monotonic() + 3.0
+        while True:
+            if wait:
+                wait(0)  # honor cancellation/overall expiry even if already settled
+            observed = read()
+            if accepted(observed):
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise MacFanError(code, "Hardware readback did not settle within 3 seconds.",
+                                  observed=observed, **details)
+            (wait or time.sleep)(min(.05, remaining))
 
     def restore(self, indices: list[int], experimental_ftst=False):
         self.require_write()
@@ -189,16 +218,16 @@ class Hardware:
         for index in indices:
             try:
                 self._set_mode(index, False)
-                if self.mode(index) != "auto":
-                    raise MacFanError("RESTORE_REJECTED", "Fan did not return to auto.", fan=index)
+                self._wait_value(lambda: self.mode(index), lambda x: x == "auto",
+                                 "RESTORE_REJECTED", fan=index, field="mode")
             except MacFanError as exc:
                 errors.append(exc.as_dict())
         if experimental_ftst:
             try:
                 if all(self.mode(i) == "auto" for i in range(self.count())):
                     self.smc.write("Ftst", b"\0")
-                    if self.smc.read("Ftst") != b"\0":
-                        raise MacFanError("RESTORE_REJECTED", "Ftst did not clear.")
+                    self._wait_value(lambda: self.smc.read("Ftst").hex(), lambda x: x == "00",
+                                     "RESTORE_REJECTED", field="Ftst")
                 else:
                     raise MacFanError("RESTORE_CONFLICT", "Another manual fan prevents clearing global Ftst.")
             except MacFanError as exc:

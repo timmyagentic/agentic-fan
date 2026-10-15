@@ -15,8 +15,12 @@ def diagnose(demo=False):
               "bundled": bool(getattr(sys, "frozen", False)), "executable": sys.executable,
               "monitoring_available": False, "control_interface_available": False,
               "hardware_write_tested": False, "running_as_root": os.geteuid() == 0,
-              "write_requires_root": not demo,
+              "write_requires_root": False, "hardware_write_requires_privilege": not demo,
               "fan_count": 0, "warnings": [], "errors": []}
+    if not demo:
+        from .helper import status
+        report["helper"] = status()
+        report["control_ready"] = bool(report["helper"].get("running") and report["helper"].get("compatible"))
     hw = None
     sensors = []
     try:

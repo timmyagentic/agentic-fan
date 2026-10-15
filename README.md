@@ -20,9 +20,9 @@ bash scripts/install-macos.sh --agent codex
 
 DMG 构建目标为 **Apple Silicon、macOS 15+**。取得构建产物后：
 
-1. 打开 `MacFan-0.2.0-arm64-dev.dmg`，把 `MacFan.app` 拖入 `Applications`。
+1. 打开 `MacFan-0.3.0-arm64-dev.dmg`，把 `MacFan.app` 拖入 `Applications`。
 2. 双击应用，查看温度测点、风扇转速和模式。
-3. 选择风扇、目标 RPM 与持续秒数，点击设置；硬件写入时由 macOS 请求管理员授权。也可以点击“全部恢复自动”。
+3. 选择风扇、目标 RPM 与持续秒数，点击设置；首次控扇时由 macOS 请求管理员授权安装 Helper，后续无需重复授权。也可以点击“全部恢复自动”。
 
 默认 CI 产物是 ad-hoc 签名的开发包，**未经 Apple 公证**，下载后可能被 Gatekeeper 拦截。正式分发需要 Developer ID 签名与公证；构建方法见 [macOS 打包说明](docs/macos-packaging.md)。仓库中的 Python 包仅用于开发，不是面向用户的安装包。
 
@@ -36,11 +36,11 @@ DMG 构建目标为 **Apple Silicon、macOS 15+**。取得构建产物后：
 "/Applications/MacFan.app/Contents/MacOS/macfan" watch --interval 1 --count 10
 ```
 
-读取不要求管理员权限。通过 CLI 进行真实风扇写入，需要通过 `sudo` 显式运行同一工具。先读取 `fans` 返回的每个风扇的 `min_rpm`、`max_rpm` 和当前模式，再选择范围内的正整数 RPM；下面的 3000 只是示例值。
+读取不要求管理员权限。首次启用控扇，以普通用户运行 `macfan helper install` 并完成一次系统授权；后续 Agent 直接调用 CLI，无需 `sudo`。升级 Helper 或卸载时可能再次需要授权。先读取 `fans` 返回的每个风扇的 `min_rpm`、`max_rpm` 和当前模式，再选择范围内的正整数 RPM；下面的 3000 只是示例值。
 
 ```sh
-sudo "/Applications/MacFan.app/Contents/MacOS/macfan" fans set --fan 0 --rpm 3000 --duration 30
-sudo "/Applications/MacFan.app/Contents/MacOS/macfan" fans auto --fan all
+"/Applications/MacFan.app/Contents/MacOS/macfan" fans set --fan 0 --rpm 3000 --duration 30
+"/Applications/MacFan.app/Contents/MacOS/macfan" fans auto --fan all
 ```
 
 `fans set` 是**前台、有期限的会话**，不是永久设置。最多 3600 秒，必须明确指定 `--duration`。它依次输出目标已写入、实际 RPM 已达到容差、自动模式已恢复等事件。Ctrl-C 可以提前结束。另一终端运行 `fans auto` 也能结束相应控制。重复 `--fan` 可同时控制多个风扇，或使用 `--fan all`；所有选中风扇的范围会在第一次写入前检查。
@@ -75,12 +75,13 @@ python3 -m macfan --demo fans
 | `fans [list]` | 当前/目标/最低/最高 RPM、模式 | 只读，单个 JSON |
 | `snapshot` | 一次采集温度与风扇 | 只读，单个 JSON |
 | `watch --interval N [--count N]` | 连续快照 | 只读，NDJSON |
-| `fans set --fan ID --rpm N --duration N` | 有时限的固定转速 | 硬件写入需要 root，NDJSON |
-| `fans auto --fan ID` | 恢复自动，`ID` 也可为 `all` | 硬件写入需要 root，单个 JSON |
+| `helper install/status/uninstall` | 安装、查看、卸载受限后台服务 | 安装/卸载需系统授权；状态只读 |
+| `fans set --fan ID --rpm N --duration N` | 有时限的固定转速 | 启用 Helper 后普通用户调用，NDJSON |
+| `fans auto --fan ID` | 恢复自动，`ID` 也可为 `all` | 启用 Helper 后普通用户调用，单个 JSON |
 
 成功输出的公共字段为 `schema_version`、`ok`、`simulated`、`timestamp`、`data`；错误输出用 `error` 提供稳定的 `code`、可读 `message` 和 `details`。机器调用应同时检查 `ok` 和进程退出码。`--help` 与 `--version` 为常规文本输出。
 
-读取的 `ok: true` 表示采集命令成功，不代表每个测点都有效。0.2.0 使用 **JSON 协议 v2**：只有传感器 `status=ok` 时 `value` 才是可采用的数值，其余为 `null`；异常与零值保留在 `raw_value`。检查 `sensor_summary`、`partial`、每个传感器的 `reason` 和每个风扇的 `errors`。`doctor` 区分接口可读与数据可用，异常、待确认和不可用项有独立计数及警告。`control_available` 表示键、类型与范围具备调用条件，不等于通过真机验证。
+读取的 `ok: true` 表示采集命令成功，不代表每个测点都有效。0.3.0 沿用 **JSON 协议 v2**：只有传感器 `status=ok` 时 `value` 才是可采用的数值，其余为 `null`；异常与零值保留在 `raw_value`。检查 `sensor_summary`、`partial`、每个传感器的 `reason` 和每个风扇的 `errors`。`doctor` 区分接口可读与数据可用，异常、待确认和不可用项有独立计数及警告。`control_available` 表示键、类型与范围具备调用条件，不等于通过真机验证。
 
 Agent 建议流程与流式消费示例见 [docs/agent-interface.md](docs/agent-interface.md)。应用的“AI native”体现在可发现、可组合、带明确权限和生命周期的接口；这个 MVP 不包含聊天界面或自主温控模型。
 
@@ -98,20 +99,20 @@ Agent 建议流程与流式消费示例见 [docs/agent-interface.md](docs/agent-
 部分新机型可能需要全局 `Ftst` 路径。只有明确指定 `--experimental-ftst` 才会写入它；它要求所有风扇原先处于自动模式且 `Ftst` 为零。该路径未经真机验证，不能当作通用兼容承诺。恢复时仅在所有风扇都处于自动模式后清除它。若常规 `fans auto` 检测到它仍非零，会报告恢复未完成；显式恢复的形式为：
 
 ```sh
-sudo "/Applications/MacFan.app/Contents/MacOS/macfan" fans auto --fan all --experimental-ftst
+"/Applications/MacFan.app/Contents/MacOS/macfan" fans auto --fan all --experimental-ftst
 ```
 
 ## 控制生命周期
 
-独立进程执行整个写入与恢复过程，CLI 通过保持管道打开维持会话。独立进程使用单调时钟和墙上时钟检查时限；在管道 EOF（包括 CLI 被 SIGKILL）、正常取消、读写故障或采样间隔异常后尝试恢复自动，并读回模式验证。选中风扇已处于手动模式时拒绝接管。
+Helper 通过独立 guardian 进程执行整个写入与恢复过程。普通 CLI 连接本地 socket，Helper 维持 guardian 管道；CLI 断开或取消会关闭管道，触发恢复。独立进程使用单调时钟和墙上时钟检查时限；在管道 EOF（包括 CLI 被 SIGKILL）、正常取消、读写故障或采样间隔异常后尝试恢复自动，并读回模式验证。选中风扇已处于手动模式时拒绝接管。
 
-目标写入与实际 RPM 到达是两个事件：必须在最多 15 秒或更短的会话时长内，观察到所有选中风扇达到 `max(100 RPM, 目标值的 8%)` 容差，否则恢复并报错。此检查不能证明整机散热效果。
+SMC 模式和目标值可能异步生效；每步最多等待 3 秒读回，超时会恢复并返回具体观察值，准备时间计入会话时限。恢复自动也等待确认。目标写入与实际 RPM 到达是两个事件：必须在最多 15 秒或更短的会话时长内，观察到所有选中风扇达到 `max(100 RPM, 目标值的 8%)` 容差，否则恢复并报错。此检查不能证明整机散热效果。
 
-锁只协调本工具，不协调其他风扇应用；验收与使用时应避免多个控制程序同时运行。杀死独立控制进程、内核调用永久阻塞、系统崩溃、固件行为或其他控制程序竞争，都可能妨碍恢复。MVP 未安装 launchd 服务，也没有睡眠前通知处理；检测到恢复运行后的采样间隔异常会结束会话。不要把它当作硬件热保护机制。
+锁只协调本工具，不协调其他风扇应用；验收与使用时应避免多个控制程序同时运行。杀死独立控制进程、内核调用永久阻塞、系统崩溃、固件行为或其他控制程序竞争，都可能妨碍恢复。Helper 由 launchd 管理；仍没有睡眠前通知处理；检测到恢复运行后的采样间隔异常会结束会话。不要把它当作硬件热保护机制。
 
-真实写入的运行锁在 root 私有的 `/var/run/macfan`。程序不创建公开 root RPC、配置免密 sudo、提供任意 SMC 键写入命令或访问网络。
+真实写入的运行锁在 root 私有的 `/var/run/macfan`。Helper 文件为 root 所有，socket 仅对安装时授权的本机 UID 开放，并通过内核凭据复核调用者。接口仅包含状态、有限控扇和恢复，不接受命令、程序路径或任意 SMC 键；不配置免密 sudo，不访问网络。详情见 [Helper 与权限边界](docs/helper.md)。
 
-桌面窗口在控扇操作期间要求先恢复或等待会话结束再正常退出。GUI 经系统授权启动独立 CLI；强制结束窗口不等于取消该 CLI，已有会话可能运行至指定时限。期限与恢复逻辑仍由控扇进程执行。
+桌面窗口在控扇操作期间要求先恢复或等待会话结束再正常退出。GUI 首次安装 Helper 后启动普通权限 CLI；强制结束窗口不等于取消该 CLI，已有会话可能运行至指定时限。期限与恢复逻辑仍由控扇进程执行。
 
 ## 开发验证
 

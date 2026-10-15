@@ -12,13 +12,7 @@ from .errors import MacFanError, invalid
 from .launch import cli_command
 
 
-AUTHORIZATION_SCRIPT = '''on run argv
-    set commandText to ""
-    repeat with argument in argv
-        set commandText to commandText & quoted form of (argument as text) & " "
-    end repeat
-    return do shell script commandText with administrator privileges
-end run'''
+from .helper_install import AUTHORIZATION_SCRIPT
 
 
 def sensor_cells(row):
@@ -49,9 +43,11 @@ def run_control(arguments: list[str], demo: bool, timeout: float) -> dict:
     if not demo:
         if sys.platform != "darwin":
             raise MacFanError("UNSUPPORTED_PLATFORM", "真实硬件控制需要 macOS。", 3)
-        # osascript receives an argv array; AppleScript quotes each argument.
-        # No password is read, stored, or handled by the Python UI.
-        command = ["/usr/bin/osascript", "-e", AUTHORIZATION_SCRIPT, *command]
+        from .helper import status
+        from .helper_install import manage
+        helper = status()
+        if not helper.get("running") or not helper.get("compatible"):
+            manage("install")
     result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
     messages = [json.loads(line) for line in result.stdout.replace("\r\n", "\n").replace("\r", "\n").splitlines() if line.strip()]
     if result.returncode:
@@ -113,7 +109,7 @@ def main(demo=False, smoke_test=False):
     ttk.Entry(controls, textvariable=rpm, width=8).pack(side="left", padx=(6, 15))
     ttk.Label(controls, text="持续秒数").pack(side="left")
     ttk.Entry(controls, textvariable=duration, width=6).pack(side="left", padx=(6, 15))
-    operation_status = tk.StringVar(value="选择一把风扇后设置。控制到期后恢复系统自动模式。")
+    operation_status = tk.StringVar(value="首次控扇需授权安装 Helper，之后无需重复授权。到期恢复系统自动。")
     ttk.Label(frame, textvariable=operation_status, wraplength=830).pack(anchor="w")
 
     def read_worker():
@@ -139,7 +135,7 @@ def main(demo=False, smoke_test=False):
         apply_button.configure(state="disabled")
         if action == "auto":
             auto_button.configure(state="disabled")
-        operation_status.set("等待系统授权或控制完成…" if not demo else "正在运行模拟控扇会话…")
+        operation_status.set("正在执行；若尚未启用 Helper，系统会请求一次安装授权…" if not demo else "正在运行模拟控扇会话…")
 
         def work():
             try:

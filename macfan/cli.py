@@ -36,6 +36,8 @@ def parser():
     commands.add_parser("schema", help="print the machine-readable command contract")
     commands.add_parser("capabilities", help="inspect available hardware interfaces")
     commands.add_parser("doctor", help="produce read-only installation and hardware diagnostics")
+    helper = commands.add_parser("helper", help="install, inspect or remove the local privileged helper")
+    helper.add_argument("helper_action", choices=("install", "status", "uninstall"))
     agent = commands.add_parser("agent", help="install the user-local CLI and Agent skill")
     integration = agent.add_subparsers(dest="agent_action", required=True)
     install = integration.add_parser("install", help="configure this bundled app for Codex or Claude Code")
@@ -139,6 +141,16 @@ def main(argv=None):
             from .doctor import diagnose
             emit(success(diagnose(args.demo), args.demo))
             return 0
+        if args.command == "helper":
+            if args.demo:
+                raise invalid("Helper management cannot be combined with --demo.")
+            if args.helper_action == "status":
+                from .helper import status
+                emit(success(status()))
+            else:
+                from .helper_install import manage
+                emit(success(manage(args.helper_action)))
+            return 0
         if args.command == "agent":
             if args.demo:
                 raise invalid("Agent installation cannot be combined with --demo.")
@@ -154,9 +166,6 @@ def main(argv=None):
                 raise invalid("Watch interval must be finite and between 0.2 and 3600 seconds.")
             if args.count is not None and args.count < 1:
                 raise invalid("Count must be positive.")
-        writing = args.command == "fans" and args.action in ("set", "auto")
-        if writing and not args.demo and os.geteuid() != 0:
-            raise MacFanError("PERMISSION_DENIED", "Fan writes require sudo. Read commands work without it.", 4)
         if args.command == "fans" and args.action == "set":
             validate_duration(args.duration)
         if args.demo:
@@ -167,6 +176,14 @@ def main(argv=None):
         if args.command == "fans":
             if args.action in ("set", "auto"):
                 indices = select_fans(args.fan, hw.count())
+                if not args.demo and os.geteuid() != 0:
+                    hw.close()
+                    hw = None
+                    from .helper import request
+                    parameters = {"fans": indices, "experimental_ftst": args.experimental_ftst}
+                    if args.action == "set":
+                        parameters.update(rpm=args.rpm, duration=args.duration)
+                    return request(args.action, **parameters)
                 if args.action == "set":
                     hw.close()
                     hw = None
@@ -199,7 +216,9 @@ def main(argv=None):
                           "os_version": platform.mac_ver()[0] if sys.platform == "darwin" else platform.release(),
                           "model": model, "sensor_count": len(sensors), "fan_count": len(fans),
                           "temperature_sources": sorted({row["source"] for row in sensors}),
-                          "fans": fans, "write_requires_root": not args.demo,
+                          "fans": fans, "write_requires_root": False,
+                          "hardware_write_requires_privilege": not args.demo,
+                          "requires_helper": not args.demo and os.geteuid() != 0,
                           "running_as_root": os.geteuid() == 0,
                           "experimental_ftst_present": hw.optional_info("Ftst") is not None}, args.demo))
         elif args.command == "watch":

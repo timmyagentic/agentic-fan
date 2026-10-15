@@ -1,6 +1,6 @@
 # Agent 调用约定
 
-先调用 `macfan schema` 发现命令。MacFan 0.2.0 的输出协议为 `schema_version: 2`；升级后应重新读取约定。CLI 是本地工具，读写范围由命令限定，不含模型运行时或网络请求。
+先调用 `macfan schema` 发现命令。MacFan 0.3.0 的输出协议为 `schema_version: 2`；升级后应重新读取约定。CLI 是本地工具，读写范围由命令限定，不含模型运行时或网络请求。
 
 通过 DMG 安装后，可执行文件路径为 `/Applications/MacFan.app/Contents/MacOS/macfan`，无需 Python 环境。传入显式命令会进入 CLI；不带参数打开窗口。`--gui` 可以显式打开窗口。
 
@@ -34,7 +34,7 @@ if process.wait() != 0:
     raise RuntimeError("Control session failed; inspect the structured error")
 ```
 
-不要拼接 shell 字符串执行模型生成的参数，使用参数数组。真实写入要求 CLI 调用进程已取得 root 权限；CLI 不代为索取或保存管理员口令。桌面窗口通过 macOS 系统授权对话框启动特权 CLI，也不会接触或存储口令。
+不要拼接 shell 字符串执行模型生成的参数，使用参数数组。先用 `helper status` 确认后台服务；若尚未安装且用户已授权启用控扇，运行 `helper install` 完成一次系统授权。后续 `fans set` / `fans auto` 以普通用户调用。CLI 不索取或保存口令，不回退到 sudo；缺失或不兼容的 Helper 返回明确错误。窗口共用该 CLI 和 Helper。
 
 传感器输出示例：
 
@@ -75,3 +75,5 @@ v2 的迁移变化：`value` 只在 `status=ok` 时为数字；`invalid`、`unve
 | 6 | 会话冲突或风扇已经处于手动模式 |
 | 7 | 自动恢复未能确认 |
 | 130 | 调用被中断；仍需检查恢复事件 |
+
+`doctor` 新增 `helper` 与 `control_ready`。`write_requires_root` 为 false，`hardware_write_requires_privilege` 为 true：权限在服务端，Agent 本身不提权。Helper 授权边界是本机用户 UID；该用户的进程均可发起限定请求。

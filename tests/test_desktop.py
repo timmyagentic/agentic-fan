@@ -52,16 +52,17 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(result["event"], "control_finished")
         self.assertTrue(result["data"]["automatic_mode_verified"])
 
-    def test_gui_uses_system_authorization_with_separate_path_arguments(self):
+    def test_gui_uses_normal_cli_after_helper_is_enabled(self):
         executable = "/Applications/A path with 'quotes'/MacFan.app/Contents/MacOS/macfan"
         reply = success({"automatic_mode_verified": True})
         completed = subprocess.CompletedProcess([], 0, json.dumps(reply) + "\r", "")
         with patch.object(sys, "frozen", True, create=True), patch.object(sys, "platform", "darwin"), \
-                patch.object(sys, "executable", executable), patch("macfan.gui.subprocess.run", return_value=completed) as run:
+                patch.object(sys, "executable", executable), patch("macfan.helper.status", return_value={"running": True, "compatible": True}), \
+                patch("macfan.helper_install.manage") as manage, patch("macfan.gui.subprocess.run", return_value=completed) as run:
             gui.run_control(["fans", "auto", "--fan", "all"], demo=False, timeout=10)
         command = run.call_args.args[0]
-        self.assertEqual(command[:2], ["/usr/bin/osascript", "-e"])
-        self.assertEqual(command[3:], [executable, "fans", "auto", "--fan", "all"])
+        self.assertEqual(command, [executable, "fans", "auto", "--fan", "all"])
+        manage.assert_not_called()
         self.assertNotIn("shell", run.call_args.kwargs)
 
     @unittest.skipUnless(sys.platform == "darwin", "Requires the macOS AppleScript compiler")

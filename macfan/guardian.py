@@ -12,7 +12,7 @@ import select
 import signal
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from .errors import MacFanError, invalid
 from .hardware import Hardware, native_hardware
@@ -42,13 +42,20 @@ def run_session(hw: Hardware, directory, indices, rpm, duration, experimental_ft
                 hw.validate_control(indices, rpm, experimental_ftst)
                 if wait_stop(0):
                     return
+                start = monotonic()
+                start_wall = wall_clock()
+                def wait_apply(delay):
+                    elapsed = max(monotonic() - start, wall_clock() - start_wall)
+                    if elapsed >= duration:
+                        raise MacFanError("CONTROL_NOT_CONFIRMED", "Session expired while waiting for hardware readback.")
+                    if wait_stop(min(delay, duration - elapsed)):
+                        raise MacFanError("CONTROL_CANCELLED", "Control cancelled while waiting for hardware readback.", 130)
                 armed = True
-                hw.apply(indices, rpm, experimental_ftst)
-            start = last_mono = monotonic()
-            start_wall = last_wall = wall_clock()
-            next_sample = start
+                hw.apply(indices, rpm, experimental_ftst, wait=wait_apply)
+            last_mono, last_wall = monotonic(), wall_clock()
+            next_sample = last_mono
             output(success({"fans": indices, "target_rpm": rpm, "duration_seconds": duration,
-                            "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=duration)).isoformat(),
+                            "expires_at": datetime.fromtimestamp(start_wall + duration, timezone.utc).isoformat(),
                             "guardian_pid": os.getpid(), "status": "target_written",
                             "experimental_ftst": experimental_ftst}, hw.simulated, "control_started"))
             while True:

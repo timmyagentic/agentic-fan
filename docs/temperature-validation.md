@@ -26,7 +26,7 @@
 
 ## 升级后只读复查
 
-按 [INSTALL.md](../INSTALL.md) 更新 App、CLI 和随包 skill。确认 `macfan --version` 为 0.2.0，`macfan schema` 的协议版本为 2，再运行：
+按 [INSTALL.md](../INSTALL.md) 更新 App、CLI 和随包 skill。确认 `macfan --version` 为当前版本，`macfan schema` 的协议版本为 2，再运行：
 
 ```sh
 macfan doctor

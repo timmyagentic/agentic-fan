@@ -6,6 +6,22 @@ import sys
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
+    if args == ["--internal-helper"] or (len(args) == 2 and args[0] in
+            ("--internal-helper-install", "--internal-helper-uninstall")):
+        from .protocol import emit, success, failure
+        from .errors import MacFanError
+        try:
+            if args == ["--internal-helper"]:
+                from .helper import serve
+                return serve()
+            from .helper_install import install_privileged, uninstall_privileged
+            action = install_privileged if args[0].endswith("-install") else uninstall_privileged
+            emit(success(action(int(args[1]))))
+            return 0
+        except Exception as exc:
+            error = exc if isinstance(exc, MacFanError) else MacFanError("HELPER_ERROR", str(exc))
+            emit(failure(error))
+            return error.exit_code
     if args == ["--internal-guardian"]:
         from .guardian import main as guardian_main
         return guardian_main()

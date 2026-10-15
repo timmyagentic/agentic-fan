@@ -37,7 +37,7 @@ bash "$macfan_checkout/repo/scripts/install-macos.sh" --agent codex
 已有 DMG 和同名 `.dmg.sha256` 文件时，可以离线安装，无需 GitHub CLI。Actions 下载包的根目录附带 `install-macos.sh`；源码仓库中的脚本位于 `scripts/`：
 
 ```sh
-bash /absolute/path/install-macos.sh --dmg /absolute/path/MacFan-0.2.0-arm64-dev.dmg --agent both
+bash /absolute/path/install-macos.sh --dmg /absolute/path/MacFan-0.3.0-arm64-dev.dmg --agent both
 ```
 
 为可重现安装，可使用 `--run-id ID` 固定到某次成功构建；安装器只接受本仓库的 push 或手动 DMG 构建，不会自动执行 PR 或其他仓库的产物。
@@ -48,8 +48,8 @@ bash /absolute/path/install-macos.sh --dmg /absolute/path/MacFan-0.2.0-arm64-dev
 
 升级也按相同安装流程执行，以同步更新 App、CLI 与所选 Agent 的 skill；若 skill 被用户修改，保留冲突并报告。0.2.0 将 JSON 协议升为 v2：零值和异常值的 `value` 均为 `null`，原始数值存于 `raw_value`，不得用作可用温度。升级后重新读取 `schema`，确认 `--version`，并执行只读 `doctor`、短期 `watch` 复查；规则详见 [温度有效性说明](docs/temperature-validation.md)。
 
-安装过程不做真实风扇写入，不配置免密 sudo，也不把模拟结果当作硬件验收。以后用户明确要求控扇时，才通过系统权限流程执行带时限的控制命令。
+安装过程不做真实风扇写入，不配置免密 sudo，也不把模拟结果当作硬件验收。用户要求启用控扇时，以普通用户运行 `macfan helper install`，通过系统授权安装 root 持有的 Helper。之后的 `fans set` / `fans auto` 无需 sudo 或重复认证。GUI 首次控扇会执行同一步骤。`helper status` 检查版本与服务；`helper uninstall` 经管理员授权卸载。活动会话期间禁止安装/卸载。
 
-目前提供的是 **未经过 Apple 公证的开发版**。脚本不会关闭 Gatekeeper 或移除 quarantine。如果系统阻止启动，需要用户在 macOS 的“隐私与安全性”设置中处理该应用的授权；这是系统授权步骤，不能伪装成无条件无人值守安装。安装与监控不应要求管理员密码；真实风扇控制需要管理员权限。
+目前提供的是 **未经过 Apple 公证的开发版**。脚本不会关闭 Gatekeeper 或移除 quarantine。如果系统阻止启动，需要用户在 macOS 的“隐私与安全性”设置中处理该应用的授权；这是系统授权步骤，不能伪装成无条件无人值守安装。安装与监控不应要求管理员密码；首次安装或更新 Helper 需要管理员授权，日常控扇由后台服务执行。
 
 用户取消系统授权、仓库不可访问或硬件接口不可用时，保留具体错误并报告已完成的部分，不把任务笼统标为成功。
