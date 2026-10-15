@@ -16,9 +16,12 @@ class AgentInstallTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name) / "user's path with spaces"
+        # macOS exposes /var as a symlink to /private/var; compare canonical
+        # identities, as the installer does for executable and home paths.
+        temporary = Path(self.temp.name).resolve()
+        self.root = temporary / "user's path with spaces"
         self.root.mkdir()
-        self.executable = Path(self.temp.name) / "app-binary"
+        self.executable = temporary / "app-binary"
         self.executable.write_text("#!/bin/sh\nexit 0\n")
         self.executable.chmod(0o755)
 
