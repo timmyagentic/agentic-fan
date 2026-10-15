@@ -37,7 +37,7 @@ bash "$macfan_checkout/repo/scripts/install-macos.sh" --agent codex
 已有 DMG 和同名 `.dmg.sha256` 文件时，可以离线安装，无需 GitHub CLI。Actions 下载包的根目录附带 `install-macos.sh`；源码仓库中的脚本位于 `scripts/`：
 
 ```sh
-bash /absolute/path/install-macos.sh --dmg /absolute/path/MacFan-0.3.0-arm64-dev.dmg --agent both
+bash /absolute/path/install-macos.sh --dmg /absolute/path/MacFan-0.3.1-arm64-dev.dmg --agent both
 ```
 
 为可重现安装，可使用 `--run-id ID` 固定到某次成功构建；安装器只接受本仓库的 push 或手动 DMG 构建，不会自动执行 PR 或其他仓库的产物。

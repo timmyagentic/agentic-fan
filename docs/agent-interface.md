@@ -1,6 +1,6 @@
 # Agent 调用约定
 
-先调用 `macfan schema` 发现命令。MacFan 0.3.0 的输出协议为 `schema_version: 2`；升级后应重新读取约定。CLI 是本地工具，读写范围由命令限定，不含模型运行时或网络请求。
+先调用 `macfan schema` 发现命令。MacFan 0.3.1 的输出协议为 `schema_version: 2`；升级后应重新读取约定。CLI 是本地工具，读写范围由命令限定，不含模型运行时或网络请求。
 
 通过 DMG 安装后，可执行文件路径为 `/Applications/MacFan.app/Contents/MacOS/macfan`，无需 Python 环境。传入显式命令会进入 CLI；不带参数打开窗口。`--gui` 可以显式打开窗口。
 
@@ -77,3 +77,5 @@ v2 的迁移变化：`value` 只在 `status=ok` 时为数字；`invalid`、`unve
 | 130 | 调用被中断；仍需检查恢复事件 |
 
 `doctor` 新增 `helper` 与 `control_ready`。`write_requires_root` 为 false，`hardware_write_requires_privilege` 为 true：权限在服务端，Agent 本身不提权。Helper 授权边界是本机用户 UID；该用户的进程均可发起限定请求。
+
+温度行增加 `display_name`、`group`、`group_name`、`label_status`、`label_source`、`label_note`。`temperature_overview` 提供按部件分组的有效已识别测点最高值与来源ID。可用 `sensors --group cpu` 等过滤；原 `id`、`name` 和原始读数保持不变。详情见 [命名说明](sensor-labels.md)。

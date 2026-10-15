@@ -25,7 +25,8 @@ MANIFEST = {
          "options": {"--target": {"enum": ["codex", "claude", "both"], "default": "codex"},
                      "--user-root": {"type": "string", "description": "User home containing .local/bin and Agent skill directories."}}},
         {"command": "sensors", "effect": "read", "stream": False,
-         "options": {"--source": {"enum": ["all", "smc", "iohid"], "default": "all"}}},
+         "options": {"--source": {"enum": ["all", "smc", "iohid"], "default": "all"},
+                     "--group": {"enum": ["all", "cpu", "gpu", "memory", "storage", "wireless", "power", "battery", "neural", "system", "unknown"], "default": "all"}}},
         {"command": "fans list", "effect": "read", "stream": False},
         {"command": "snapshot", "effect": "read", "stream": False},
         {"command": "watch", "effect": "read", "stream": True,
@@ -75,6 +76,8 @@ MANIFEST = {
                   {"properties": {"ok": {"const": False}}, "required": ["error"]}]
     },
     "semantics": {
+        "sensor_labels": "Additive display_name/group/group_name/label_status/label_source/label_note fields. Original id and name stay unchanged. community_mapping is chip-scoped; system_name translates IOHID Product. label_verified remains false; neither source proves physical calibration or a physical core number.",
+        "temperature_overview": "Per identified group, the maximum of currently valid mapped points, with contributing IDs and value_sensor_id. Unknown and calibration rows are excluded. This is not a package sensor or an average. Missing valid data returns null.",
         "authorization": "Run helper install once as the normal user. Subsequent set/auto commands use the local helper without sudo or prompts. Updating/removing the helper may require authorization again. Access is granted to processes of that user, not authenticated by app identity.",
         "readback": "Mode, target and restoration readback are polled for up to 3 seconds per step. Setup counts toward the session duration. No automatic Ftst opt-in or repeated SMC writes.",
         "temperatures": "Celsius; value is populated only for status=ok. Finite interface readings are preserved in raw_value; non-finite values use raw_non_finite. No imputation. Labels/physical locations are unverified; IOHID IDs last for this boot.",

@@ -45,6 +45,8 @@ def parser():
     install.add_argument("--user-root", type=Path, default=Path.home(), help="user directory (defaults to the current home)")
     sensors = commands.add_parser("sensors", help="read raw temperature sensors")
     sensors.add_argument("--source", choices=("all", "smc", "iohid"), default="all")
+    from .sensor_labels import GROUPS
+    sensors.add_argument("--group", choices=("all", *GROUPS), default="all", help="filter identified component groups")
     commands.add_parser("snapshot", help="read temperatures and fan state")
     watch = commands.add_parser("watch", help="stream snapshots as NDJSON")
     watch.add_argument("--interval", type=float, default=1, help="seconds between samples (0.2..3600)")
@@ -195,9 +197,10 @@ def main(argv=None):
             else:
                 emit(success({"fans": hw.fans(), "warnings": hw.warnings}, args.demo))
         elif args.command == "sensors":
-            sensors = [row for row in hw.temperatures() if args.source in ("all", row["source"])]
+            sensors = [row for row in hw.temperatures() if args.source in ("all", row["source"])
+                       and args.group in ("all", row.get("group", "unknown"))]
             if not sensors:
-                raise MacFanError("NO_TEMPERATURE_SENSORS", "No readable temperature interfaces were discovered for this source.", 3, warnings=hw.warnings)
+                raise MacFanError("NO_TEMPERATURE_SENSORS", "No temperature sensors matched the requested source and component group.", 3, warnings=hw.warnings)
             emit(success(sensor_report(sensors, hw.warnings), args.demo))
         elif args.command == "snapshot":
             emit(success(snapshot(hw), args.demo))

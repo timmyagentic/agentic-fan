@@ -17,12 +17,13 @@ def now() -> str:
 class Hardware:
     """Typed hardware operations shared by native and deterministic test transports."""
 
-    def __init__(self, transport, hid=None, simulated=False, warnings=None):
+    def __init__(self, transport, hid=None, simulated=False, warnings=None, device=None):
         self.smc = transport
         self.hid = hid
         self.simulated = simulated
         self.warnings = list(warnings or [])
         self._temperature_keys = None
+        self.device = device
 
     def optional_info(self, key: str):
         try:
@@ -122,7 +123,10 @@ class Hardware:
             rows.append(row)
         if self.hid:
             rows.extend(self.hid.read(timestamp))
-        return rows
+        from .sensor_labels import annotate, machine_identity
+        if self.device is None:
+            self.device = {'model': 'Demo', 'chip': 'Demo'} if self.simulated else machine_identity()
+        return annotate(rows, self.device)
 
     def require_write(self):
         if not self.simulated and os.geteuid() != 0:

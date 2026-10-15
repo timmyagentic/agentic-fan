@@ -63,7 +63,10 @@ def sensor_report(rows, warnings=()) -> dict:
             notices.append({"code": code, "message": message, "details": {"count": len(ids), "sensor_ids": ids}})
     if not rows:
         notices.append({"code": "NO_TEMPERATURE_SENSORS", "message": "No temperature sensors were discovered.", "details": {}})
+    from .sensor_labels import overview
     return {"sensors": rows, "sensor_summary": summary, "warnings": notices,
+            "temperature_overview": overview(rows),
+            "identified_sensor_count": sum(row.get('group', 'unknown') != 'unknown' for row in rows),
             "temperature_interface_available": summary["readable"] > 0,
             "monitoring_available": summary["ok"] > 0,
             "partial": summary["data_quality"] != "complete" or bool(warnings)}
