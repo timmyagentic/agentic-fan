@@ -57,7 +57,7 @@ class HardwareTests(unittest.TestCase):
         rows = {row["id"]: row for row in self.hw.temperatures()}
         self.assertEqual(rows["smc:TN01"]["value"], -0.5)
         self.assertEqual(rows["smc:TCDX"]["value"], 47.5)
-        self.assertEqual(rows["smc:Tbad"]["status"], "unavailable")
+        self.assertEqual(rows["smc:Tbad"]["status"], "invalid")
         self.assertIsNone(rows["smc:Tbad"]["value"])
         self.assertEqual(rows["smc:Tp00"]["status"], "unverified")
         self.assertFalse(any(row["estimated"] for row in rows.values()))

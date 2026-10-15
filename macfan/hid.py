@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import ctypes as C
-import math
 
 from .errors import MacFanError
 from .smc import bind
+from .temperatures import reading
 
 
 class HIDTemperatures:
@@ -80,18 +80,18 @@ class HIDTemperatures:
         sensors = []
         for service, name, rid in self.entries:
             row = {"id": f"hid:{rid}", "name": name, "source": "iohid", "unit": "celsius",
-                   "value": None, "status": "unavailable", "sampled_at": timestamp,
-                   "estimated": False, "identity_scope": "boot"}
+                   **reading(unavailable_reason="no_event"), "sampled_at": timestamp,
+                   "estimated": False, "identity_scope": "boot", "label_verified": False}
             event = self.event(service, 15, 0, 0)
             if event:
                 try:
                     value = self.event_value(event, 15 << 16)
-                    if math.isfinite(value):
-                        row.update(value=value, status="unverified" if value == 0 else "ok")
-                    else:
-                        row["error"] = "Non-finite temperature event."
+                    row.update(reading(value))
                 finally:
                     self.release(event)
+            else:
+                row["error"] = {"code": "TEMPERATURE_EVENT_UNAVAILABLE", "message": "IOHID returned no temperature event.",
+                                "details": {"sensor_id": row["id"]}}
             sensors.append(row)
         return sensors
 

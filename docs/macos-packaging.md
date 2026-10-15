@@ -15,7 +15,7 @@ python3 -m venv .venv
 
 默认产物：
 
-- `MacFan-0.1.0-arm64-dev.dmg`：ad-hoc 签名、未经公证的开发包。
+- `MacFan-0.2.0-arm64-dev.dmg`：ad-hoc 签名、未经公证的开发包。
 - 同名 `.dmg.sha256`：完整 DMG 的 SHA-256。
 - 同名前缀 `.build.json`：工具版本、架构、签名、公证状态与完成的打包检查。
 - `install-macos.sh` 和 `INSTALL.md`：Agent 安装脚本和安装说明；可用本地 DMG 离线安装。

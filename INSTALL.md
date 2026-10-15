@@ -37,14 +37,16 @@ bash "$macfan_checkout/repo/scripts/install-macos.sh" --agent codex
 已有 DMG 和同名 `.dmg.sha256` 文件时，可以离线安装，无需 GitHub CLI。Actions 下载包的根目录附带 `install-macos.sh`；源码仓库中的脚本位于 `scripts/`：
 
 ```sh
-bash /absolute/path/install-macos.sh --dmg /absolute/path/MacFan-0.1.0-arm64-dev.dmg --agent both
+bash /absolute/path/install-macos.sh --dmg /absolute/path/MacFan-0.2.0-arm64-dev.dmg --agent both
 ```
 
 为可重现安装，可使用 `--run-id ID` 固定到某次成功构建；安装器只接受本仓库的 push 或手动 DMG 构建，不会自动执行 PR 或其他仓库的产物。
 
 ## 验收与权限
 
-报告三个独立结果：App/CLI 是否安装完成、skill 是否已放置、实际温度和风扇接口是否可用。`doctor` 退出码为 0 只代表诊断成功返回；必须检查 `data.status`、`monitoring_available`、`control_interface_available`、`errors` 与 `simulated`。无风扇设备可以温度监控成功而没有风扇控制接口。
+报告三个独立结果：App/CLI 是否安装完成、skill 是否已放置、实际温度和风扇接口是否可用。`doctor` 退出码为 0 只代表诊断成功返回；必须检查 `data.status`、`temperature_interface_available`、`monitoring_available`、`data_quality`、`sensor_summary`、`control_interface_available`、`warnings`、`errors` 与 `simulated`。无风扇设备可以温度监控成功而没有风扇控制接口。`valid_sensor_count` 只计通过合理性检查的读数，不代表已验证的物理传感器数量。
+
+升级也按相同安装流程执行，以同步更新 App、CLI 与所选 Agent 的 skill；若 skill 被用户修改，保留冲突并报告。0.2.0 将 JSON 协议升为 v2：零值和异常值的 `value` 均为 `null`，原始数值存于 `raw_value`，不得用作可用温度。升级后重新读取 `schema`，确认 `--version`，并执行只读 `doctor`、短期 `watch` 复查；规则详见 [温度有效性说明](docs/temperature-validation.md)。
 
 安装过程不做真实风扇写入，不配置免密 sudo，也不把模拟结果当作硬件验收。以后用户明确要求控扇时，才通过系统权限流程执行带时限的控制命令。
 

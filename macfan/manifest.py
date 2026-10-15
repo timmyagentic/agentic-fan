@@ -1,7 +1,11 @@
 """Machine-readable CLI contract, available without hardware or privileges."""
 
+from . import SCHEMA_VERSION, __version__
+from .temperatures import POLICY, STATUSES
+
 MANIFEST = {
-    "name": "macfan", "version": "0.1.0", "schema_version": 1,
+    "name": "macfan", "version": __version__, "schema_version": SCHEMA_VERSION,
+    "temperature_validation_policy": dict(POLICY),
     "description": "Local Mac temperature monitoring and bounded manual fan control.",
     "network_required": False, "model_required": False,
     "desktop_entry": {"option": "--gui", "default_when_bundled_without_arguments": True,
@@ -38,20 +42,42 @@ MANIFEST = {
         "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
         "required": ["schema_version", "ok", "simulated", "timestamp"],
         "properties": {
-            "schema_version": {"const": 1}, "ok": {"type": "boolean"}, "simulated": {"type": "boolean"},
+            "schema_version": {"const": SCHEMA_VERSION}, "ok": {"type": "boolean"}, "simulated": {"type": "boolean"},
             "timestamp": {"type": "string", "format": "date-time"},
             "event": {"enum": ["sample", "control_started", "control_confirmed", "control_finished"]},
-            "data": {"type": "object"},
+            "data": {"type": "object", "properties": {
+                "sensors": {"type": "array", "items": {"$ref": "#/$defs/temperature_sensor"}},
+                "sensor_issues": {"type": "array", "items": {"$ref": "#/$defs/temperature_sensor"}},
+            }},
             "error": {"type": "object", "required": ["code", "message", "details"],
                       "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "details": {"type": "object"}}}
         },
+        "$defs": {"temperature_sensor": {
+            "type": "object", "required": ["id", "source", "unit", "value", "raw_value", "status", "reason", "sampled_at", "label_verified"],
+            "properties": {
+                "id": {"type": "string"}, "source": {"enum": ["smc", "iohid"]}, "unit": {"const": "celsius"},
+                "status": {"enum": list(STATUSES)}, "reason": {"type": ["string", "null"]},
+                "value": {"type": ["number", "null"]}, "raw_value": {"type": ["number", "null"]},
+                "raw_non_finite": {"enum": ["nan", "+infinity", "-infinity"]},
+                "sampled_at": {"type": "string", "format": "date-time"}, "label_verified": {"type": "boolean"},
+            },
+            "oneOf": [
+                {"properties": {"status": {"const": "ok"}, "value": {"type": "number"}, "reason": {"type": "null"}}},
+                {"properties": {"status": {"enum": ["invalid", "unverified", "unavailable"]}, "value": {"type": "null"}, "reason": {"type": "string"}}},
+            ],
+        }},
         "oneOf": [{"properties": {"ok": {"const": True}}, "required": ["data"]},
                   {"properties": {"ok": {"const": False}}, "required": ["error"]}]
     },
     "semantics": {
-        "temperatures": "Celsius, raw measurements; no imputation or random offsets. SMC labels are unverified keys, IOHID IDs last for this boot.",
-        "sensor_status": {"ok": "Finite read succeeded; not a guarantee of sensor calibration or physical mapping.",
-                          "unverified": "Zero reading, which may indicate an inactive sensor.", "unavailable": "Read failed; value is null."},
+        "temperatures": "Celsius; value is populated only for status=ok. Finite interface readings are preserved in raw_value; non-finite values use raw_non_finite. No imputation. Labels/physical locations are unverified; IOHID IDs last for this boot.",
+        "sensor_status": {"ok": "Nonzero finite reading within the declared plausibility bounds, not proof of calibration, physical mapping or thermal safety.",
+                          "invalid": "Reading is non-finite or outside plausibility bounds. value is null; inspect reason and raw evidence.",
+                          "unverified": "Zero reading; value is null and raw_value is zero. May indicate an inactive sensor.",
+                          "unavailable": "Read failed or no event; value and raw_value are null."},
+        "sensor_summary": "Counts from the current sample: total, readable (including invalid/unverified), ok, invalid, unverified, unavailable, by_source and validation_policy. data_quality is complete, partial, unusable (readable but none ok), or unavailable.",
+        "doctor": "temperature_interface_available means at least one interface returned a reading; monitoring_available requires at least one ok sensor. valid_sensor_count counts only ok sensors, not calibrated or independently verified physical sensors. status is limited when monitoring exists but warnings, errors or rejected readings remain. sensor_issues preserves rejected evidence. hardware_write_tested stays false.",
+        "schema_migration": "v2 adds invalid status, raw_value, reason and quality summaries. Zero/unverified value is now null. Only consume value for status=ok; raw_value is diagnostic evidence, not fallback temperature.",
         "control_available": "Recognized readable keys and RPM bounds, not verified physical actuation.",
         "control_confirmed": "Every selected fan was observed within max(100 RPM, 8 percent) of target.",
         "stream_format": "NDJSON: each stdout line is an independent envelope. Read through the final event and check process exit status.",

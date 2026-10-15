@@ -50,7 +50,7 @@ class CLITests(unittest.TestCase):
         code, messages = self.run_cli("schema", demo=False)
         self.assertEqual(code, 0)
         manifest = messages[0]["data"]
-        self.assertEqual(manifest["schema_version"], 1)
+        self.assertEqual(manifest["schema_version"], 2)
         self.assertIn("fans set", [x["command"] for x in manifest["commands"]])
 
     def test_snapshot_and_watch_are_explicit_simulations(self):

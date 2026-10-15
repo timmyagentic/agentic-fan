@@ -28,7 +28,7 @@ def key_number(key: str) -> int:
     return int.from_bytes(raw, "big")
 
 
-def decode(info: KeyInfo, raw: bytes) -> float:
+def decode(info: KeyInfo, raw: bytes, *, require_finite=True) -> float:
     expected = SIZES.get(info.kind)
     if expected is None or info.size != expected or len(raw) != expected:
         raise MacFanError("UNSUPPORTED_ENCODING", "Unsupported SMC type or payload length.",
@@ -41,7 +41,7 @@ def decode(info: KeyInfo, raw: bytes) -> float:
         value = float(struct.unpack("<f", raw)[0])
     else:
         value = float(int.from_bytes(raw, "big"))
-    if not math.isfinite(value):
+    if require_finite and not math.isfinite(value):
         raise MacFanError("INVALID_READING", "SMC returned a non-finite value.", kind=info.kind)
     return value
 

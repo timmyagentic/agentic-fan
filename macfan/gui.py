@@ -21,6 +21,19 @@ AUTHORIZATION_SCRIPT = '''on run argv
 end run'''
 
 
+def sensor_cells(row):
+    """Keep rejected raw observations visible without presenting usable temperatures."""
+    reasons = {"outside_plausible_range": "超出合理范围", "non_finite_reading": "非有限数值",
+               "zero_reading": "零读数", "no_event": "无温度事件", "read_failed": "读取失败"}
+    status = {"ok": "通过合理性检查", "invalid": "异常", "unverified": "待确认", "unavailable": "不可用"}.get(row["status"], "未知")
+    if row.get("reason"):
+        status += "：" + reasons.get(row["reason"], row["reason"])
+    value = "—" if row["value"] is None else f"{row['value']:.1f}"
+    raw = row.get("raw_value")
+    raw_text = row.get("raw_non_finite", "—") if raw is None else f"{raw:.1f}"
+    return row["name"], value, raw_text, row["source"], status
+
+
 def control_arguments(fan_id: int, rpm: str, duration: str) -> list[str]:
     try:
         speed, seconds = int(rpm), int(duration)
@@ -88,7 +101,8 @@ def main(demo=False, smoke_test=False):
         return tree
 
     ttk.Label(frame, text="温度传感器", font=("Helvetica", 13, "bold")).pack(anchor="w", pady=(0, 6))
-    sensors = table(frame, ("name", "value", "source", "status"), ("传感器", "温度 °C", "数据源", "状态"), 10)
+    sensors = table(frame, ("name", "value", "raw", "source", "status"), ("传感器", "可用温度 °C", "原始读数 °C", "数据源", "状态"), 10)
+    ttk.Label(frame, text="测点名称的物理位置尚未确认；通过合理性检查不代表散热安全。").pack(anchor="w", pady=(0, 8))
     ttk.Label(frame, text="风扇", font=("Helvetica", 13, "bold")).pack(anchor="w", pady=(0, 6))
     fans = table(frame, ("name", "rpm", "range", "mode"), ("风扇", "当前 RPM", "允许范围 RPM", "模式"), 3)
     controls = ttk.Frame(frame)
@@ -179,8 +193,7 @@ def main(demo=False, smoke_test=False):
                 kind, data = events.get_nowait()
                 if kind == "snapshot":
                     loaded = True
-                    update_rows(sensors, [(row["id"], (row["name"], "—" if row["value"] is None else f"{row['value']:.1f}",
-                        row["source"], {"ok": "已读取", "unverified": "待确认", "unavailable": "不可用"}[row["status"]])) for row in data["sensors"]])
+                    update_rows(sensors, [(row["id"], sensor_cells(row)) for row in data["sensors"]])
                     fan_rows.clear()
                     fan_rows.update({row["id"]: row for row in data["fans"]})
                     update_rows(fans, [(row["id"], (row["name"], "—" if row["actual_rpm"] is None else f"{row['actual_rpm']:.0f}",
@@ -189,8 +202,10 @@ def main(demo=False, smoke_test=False):
                     if not fans.selection() and fans.get_children():
                         fans.selection_set(fans.get_children()[0])
                     prefix = "演示数据 · " if demo else ""
-                    warning = " · 部分读数待确认" if data["partial"] else ""
-                    status.set(f"{prefix}{len(data['sensors'])} 个温度测点 · {len(data['fans'])} 把风扇{warning}")
+                    counts = data["sensor_summary"]
+                    warning = " · 诊断有提示" if data["warnings"] or any(row["errors"] for row in data["fans"]) else ""
+                    status.set(f"{prefix}{counts['total']} 个温度测点：{counts['ok']} 可用 · {counts['invalid']} 异常 · "
+                               f"{counts['unverified']} 待确认 · {counts['unavailable']} 不可用 · {len(data['fans'])} 把风扇{warning}")
                 elif kind == "read_error":
                     read_failed = True
                     update_rows(sensors, [])

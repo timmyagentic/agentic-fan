@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from .codecs import KeyInfo, decode, encode_rpm
 from .errors import MacFanError, MissingKey, invalid
+from .temperatures import reading
 
 
 def now() -> str:
@@ -108,12 +109,13 @@ class Hardware:
         rows = []
         for key in self._temperature_keys:
             row = {"id": f"smc:{key}", "name": key, "key": key, "source": "smc", "unit": "celsius",
-                   "value": None, "status": "unavailable", "sampled_at": timestamp,
+                   **reading(), "sampled_at": timestamp,
                    "estimated": False, "identity_scope": "machine", "label_verified": False}
             try:
-                value = self.number(key)
-                # Keep the measurement. Zero can mean an inactive sensor; do not invent a replacement.
-                row.update(value=value, status="unverified" if value == 0 else "ok")
+                # Preserve non-finite evidence for temperature validation only.
+                # Fan/RPM decoding continues to reject non-finite values.
+                value = decode(self.smc.info(key), self.smc.read(key), require_finite=False)
+                row.update(reading(value))
             except MacFanError as exc:
                 row["error"] = exc.as_dict()
             rows.append(row)

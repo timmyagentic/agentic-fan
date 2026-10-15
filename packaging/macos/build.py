@@ -11,6 +11,7 @@ import platform
 import plistlib
 import runpy
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -39,6 +40,20 @@ def smoke(executable: Path, directory: Path, gui=True):
             raise RuntimeError("Packaged guardian did not confirm restoration")
         if "--demo" in arguments and not all(message["simulated"] for message in messages):
             raise RuntimeError("Packaged smoke test was not explicitly simulated")
+    # Exercise rejection and presentation in the frozen app as well as source tests.
+    # This file belongs exclusively to the explicitly simulated transport above.
+    state_path = directory / "demo" / "state.json"
+    state = json.loads(state_path.read_text())
+    state["TCDX"] = struct.pack("<f", -9200.0).hex()
+    state["Tg0D"] = struct.pack("<f", 115.6).hex()
+    state_path.write_text(json.dumps(state))
+    diagnostic = run(executable, "--demo", "doctor", cwd=directory, env=env, capture_output=True, text=True, timeout=30)
+    message = json.loads(diagnostic.stdout)
+    report = message["data"]
+    if (message["schema_version"] != 2 or not message["simulated"] or report["status"] != "limited" or
+            report["valid_sensor_count"] != 2 or report["sensor_summary"]["invalid"] != 1 or
+            not any(row["raw_value"] == -9200 and row["value"] is None for row in report["sensor_issues"])):
+        raise RuntimeError("Packaged app failed temperature-quality regression")
     if gui:
         run(executable, "--gui", "--demo", "--gui-smoke-test", cwd=directory, env=env, timeout=30)
 
@@ -135,7 +150,7 @@ def main(argv=None):
         "artifact": dmg.name, "version": version, "architecture": "arm64", "minimum_macos": "15.0",
         "python": platform.python_version(), "pyinstaller": PyInstaller.__version__,
         "signing": "developer_id" if args.identity else "ad_hoc", "notarized": bool(args.notary_profile),
-        "verified": ["codesign", "hdiutil", "mounted_app", "bundled_cli", "demo_guardian", "demo_gui"],
+        "verified": ["codesign", "hdiutil", "mounted_app", "bundled_cli", "demo_guardian", "demo_gui", "demo_temperature_quality"],
         "hardware_verified": False, "sha256": digest,
     }
     dmg.with_suffix(".build.json").write_text(json.dumps(metadata, indent=2) + "\n")

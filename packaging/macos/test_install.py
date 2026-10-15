@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -40,7 +41,8 @@ def main():
         binary = user / ".local/bin/macfan"
         assert binary.resolve() == executable.resolve()
         for folder in (".agents", ".claude"):
-            assert (user / folder / "skills/macfan/SKILL.md").is_file()
+            skill = user / folder / "skills/macfan/SKILL.md"
+            assert skill.is_file() and "schema_version: 2" in skill.read_text()
         profile = (user / ".zprofile").read_text()
         assert profile.startswith("# Preserve user settings\n")
         assert (user / ".zprofile.before-macfan").read_text() == "# Preserve user settings\n"
@@ -48,9 +50,12 @@ def main():
         run(*command, timeout=180)
         assert (user / ".zprofile").read_text() == profile
         assert not list((user / "Applications").glob("MacFan.previous.*.app"))
-        demo = json.loads(run(binary, "--demo", "doctor").stdout)
+        demo_env = dict(os.environ, MACFAN_DEMO_DIR=str(work / "demo"))
+        demo = json.loads(run(binary, "--demo", "doctor", env=demo_env).stdout)
         assert demo["simulated"] and demo["data"]["monitoring_available"]
-        controlled = run(binary, "--demo", "fans", "set", "--fan", "all", "--rpm", "3000", "--duration", "1")
+        assert demo["schema_version"] == 2 and demo["data"]["status"] == "limited"
+        assert demo["data"]["valid_sensor_count"] == 3 and demo["data"]["sensor_summary"]["unverified"] == 1
+        controlled = run(binary, "--demo", "fans", "set", "--fan", "all", "--rpm", "3000", "--duration", "1", env=demo_env)
         assert json.loads(controlled.stdout.splitlines()[-1])["data"]["automatic_mode_verified"]
         if args.dmg:
             corrupt = work / "corrupt.dmg"

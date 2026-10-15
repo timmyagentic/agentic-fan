@@ -2,7 +2,7 @@
 
 MVP 提供两个核心能力：读取温度传感器；在有限时长内设置风扇转速并恢复自动控制。面向 Apple Silicon，交付格式为 **DMG 内的 `MacFan.app`**，内含窗口、CLI 和所需运行时。用户不需要安装 Python，也不需要模型、API Key 或网络服务。
 
-**当前状态：macOS CI 已成功构建并挂载验证 DMG，应用窗口与内置 CLI 的模拟测试已通过。** 真实 Apple Silicon 读写与各机型兼容性仍须按 [硬件验收清单](docs/hardware-validation.md) 验证。模拟测试通过不能证明硬件控制有效。
+**当前状态：已有真实 Mac 的只读安装反馈，尚无完整硬件控扇验收。** 0.2.0 修复了异常温度被标为正常、诊断数量失真和缺少告警的问题；规则与验收方式见 [温度有效性说明](docs/temperature-validation.md)。各机型的实际调速与自动恢复须按 [硬件验收清单](docs/hardware-validation.md) 验证，CI 和模拟测试不能代替。
 
 ## 给 Agent 一句话安装
 
@@ -20,7 +20,7 @@ bash scripts/install-macos.sh --agent codex
 
 DMG 构建目标为 **Apple Silicon、macOS 15+**。取得构建产物后：
 
-1. 打开 `MacFan-0.1.0-arm64-dev.dmg`，把 `MacFan.app` 拖入 `Applications`。
+1. 打开 `MacFan-0.2.0-arm64-dev.dmg`，把 `MacFan.app` 拖入 `Applications`。
 2. 双击应用，查看温度测点、风扇转速和模式。
 3. 选择风扇、目标 RPM 与持续秒数，点击设置；硬件写入时由 macOS 请求管理员授权。也可以点击“全部恢复自动”。
 
@@ -80,7 +80,7 @@ python3 -m macfan --demo fans
 
 成功输出的公共字段为 `schema_version`、`ok`、`simulated`、`timestamp`、`data`；错误输出用 `error` 提供稳定的 `code`、可读 `message` 和 `details`。机器调用应同时检查 `ok` 和进程退出码。`--help` 与 `--version` 为常规文本输出。
 
-读取的 `ok: true` 表示采集命令成功，不代表每个测点都有效。检查 `partial`、每个传感器的 `status` 和每个风扇的 `errors`。`control_available` 表示键、类型与范围具备调用条件，不等于通过真机验证。
+读取的 `ok: true` 表示采集命令成功，不代表每个测点都有效。0.2.0 使用 **JSON 协议 v2**：只有传感器 `status=ok` 时 `value` 才是可采用的数值，其余为 `null`；异常与零值保留在 `raw_value`。检查 `sensor_summary`、`partial`、每个传感器的 `reason` 和每个风扇的 `errors`。`doctor` 区分接口可读与数据可用，异常、待确认和不可用项有独立计数及警告。`control_available` 表示键、类型与范围具备调用条件，不等于通过真机验证。
 
 Agent 建议流程与流式消费示例见 [docs/agent-interface.md](docs/agent-interface.md)。应用的“AI native”体现在可发现、可组合、带明确权限和生命周期的接口；这个 MVP 不包含聊天界面或自主温控模型。
 
@@ -91,7 +91,7 @@ Agent 建议流程与流式消费示例见 [docs/agent-interface.md](docs/agent-
 - 通过 IOKit AppleSMC 枚举 `T*` 温度类型键，并按每个键自身的 `sp78` 或 `flt ` 元数据解码；读取过程不改写任何键。
 - 通过 IOHID 温度事件读取包括初代 M1 在内的可用测点。私有接口可能受 macOS 版本或访问策略影响；不可用会明确返回警告。
 - 不复制商业应用的 XML 数据库。SMC 测点以原始键名标识，不声称已确认物理位置，也不保证所有 `T*` 键都是独立物理测点。IOHID ID 在本次系统启动内有效。
-- 保留读数来源与时间戳；失败值为 `null`，零值标为 `unverified`。不补造休眠核心温度，不做未经定义的“核心平均温度”。
+- 保留原始读数、来源与时间戳；有限非零值通过 −40～150°C 的宽范围检查才标为 `ok`，不是校准或安全温度保证。异常值为 `invalid`，零值为 `unverified`，读取失败为 `unavailable`；这些项的可用值均为 `null`。不补造休眠核心温度，不做未经定义的“核心平均温度”。
 - 支持按键探测的 `F{i}Md` / `F{i}md` 模式、`flt ` / `fpe2` RPM，以及 Intel 的 `FS! ` 位图。Intel 路径也未经真机验收。
 - 无风扇设备可以监控温度，不能设置风扇。暂不包含 SMART 磁盘、GPU 厂商私有接口、预设或温度曲线。
 

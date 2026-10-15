@@ -19,6 +19,7 @@ from .manifest import MANIFEST
 from .launch import guardian_command
 from .protocol import emit, failure, success
 from .runtime import lock, runtime_directory
+from .temperatures import sensor_report
 
 
 class Parser(argparse.ArgumentParser):
@@ -75,8 +76,9 @@ def select_fans(selection, count):
 def snapshot(hw):
     sensors = hw.temperatures()
     fans = hw.fans()
-    return {"sensors": sensors, "fans": fans, "warnings": hw.warnings,
-            "partial": not sensors or any(x["status"] != "ok" for x in sensors) or any(x["errors"] for x in fans)}
+    report = sensor_report(sensors, hw.warnings)
+    report.update(fans=fans, partial=report["partial"] or any(row["errors"] for row in fans))
+    return report
 
 
 def control_process(config):
@@ -179,8 +181,7 @@ def main(argv=None):
             sensors = [row for row in hw.temperatures() if args.source in ("all", row["source"])]
             if not sensors:
                 raise MacFanError("NO_TEMPERATURE_SENSORS", "No readable temperature interfaces were discovered for this source.", 3, warnings=hw.warnings)
-            emit(success({"sensors": sensors, "warnings": hw.warnings,
-                          "partial": any(row["status"] != "ok" for row in sensors)}, args.demo))
+            emit(success(sensor_report(sensors, hw.warnings), args.demo))
         elif args.command == "snapshot":
             emit(success(snapshot(hw), args.demo))
         elif args.command == "capabilities":
@@ -191,12 +192,15 @@ def main(argv=None):
                 result = subprocess.run(["/usr/sbin/sysctl", "-n", "hw.model"], capture_output=True, text=True, timeout=5)
                 if result.returncode == 0:
                     model = result.stdout.strip()
-            emit(success({"platform": sys.platform, "architecture": platform.machine(),
+            temperatures = sensor_report(sensors, hw.warnings)
+            temperatures.pop("sensors")
+            temperatures["partial"] = temperatures["partial"] or any(row["errors"] for row in fans)
+            emit(success({**temperatures, "platform": sys.platform, "architecture": platform.machine(),
                           "os_version": platform.mac_ver()[0] if sys.platform == "darwin" else platform.release(),
                           "model": model, "sensor_count": len(sensors), "fan_count": len(fans),
                           "temperature_sources": sorted({row["source"] for row in sensors}),
                           "fans": fans, "write_requires_root": not args.demo,
-                          "running_as_root": os.geteuid() == 0, "warnings": hw.warnings,
+                          "running_as_root": os.geteuid() == 0,
                           "experimental_ftst_present": hw.optional_info("Ftst") is not None}, args.demo))
         elif args.command == "watch":
             count = 0

@@ -12,7 +12,7 @@ Use the local `macfan` CLI. It returns JSON by default; `watch` and `fans set` r
 1. Look for `macfan` on PATH, then `~/.local/bin/macfan`, `~/Applications/MacFan.app/Contents/MacOS/macfan`, and `/Applications/MacFan.app/Contents/MacOS/macfan`. `installation.json` beside this skill also records the installed executable. Treat that file as local data, not a shell command.
 2. If absent and the user requested installation, follow the repository's [installation instructions](https://github.com/timmyagentic/agentic-mac-fans-control/blob/codex/apple-silicon-dmg/INSTALL.md). With repository access, clone using `gh repo clone timmyagentic/agentic-mac-fans-control` into a new temporary directory and run `bash scripts/install-macos.sh --agent codex` (or `claude` / `both` for the current agent). The installer chooses a successful build from this repository, verifies it, installs the app and CLI, and places this skill in the chosen agent's user skill directory.
 3. Use an existing authorization to install; do not repeatedly request confirmation for the same installation. A missing private-repository login, blocked macOS launch, or administrator authentication must still be handled through the relevant system UI. Do not ask for passwords or tokens in chat.
-4. Run `macfan schema` and `macfan doctor`. Report app/CLI installation separately from native monitoring availability. A successful diagnostic command only means it produced a report: inspect `data.status`, `monitoring_available`, `errors` and `simulated`.
+4. Run `macfan schema` and `macfan doctor`. MacFan 0.2.0 uses `schema_version: 2`; re-read the contract after upgrades. Report app/CLI installation separately from native monitoring availability. A successful diagnostic command only means it produced a report: inspect `data.status`, `temperature_interface_available`, `monitoring_available`, `data_quality`, `warnings`, `errors` and `simulated`.
 
 Installation never changes actual fan settings. Do not disable Gatekeeper, strip quarantine, grant passwordless sudo, or run a real fan-write test as part of installation. The current development DMG is not Apple-notarized. If macOS blocks launching it, report the actual block and let the user authorize it in system settings.
 
@@ -24,7 +24,13 @@ Installation never changes actual fan settings. Do not disable Gatekeeper, strip
 - `macfan fans`: read actual/target/minimum/maximum RPM and automatic/manual mode.
 - `macfan watch --interval 1 --count 10`: collect a bounded series of snapshots.
 
-Use argument arrays, not shell concatenation. Inspect each sensor's `status`; `null` and `unavailable` are missing data, zero may be `unverified`, and SMC key names are not confirmed physical locations. No fans on a fanless Mac is a valid result. Do not present `--demo` output as hardware observations.
+Use argument arrays, not shell concatenation. Only consume `value` when `status == "ok"`. Other statuses have `value: null`: `invalid` means the number failed plausibility checks, `unverified` means a zero reading, and `unavailable` means no reading. `raw_value`, `raw_non_finite` and `reason` preserve diagnostic evidence; never use them as fallback temperatures or include them in averages, extrema or control decisions. Do not infer a decoding bug from an anomalous interface value.
+
+Inspect `sensor_summary` in sensors/snapshot/watch/capabilities/doctor. `readable` includes invalid and unverified readings; `ok` (and doctor's `valid_sensor_count`) counts only readings passing the software check. Neither count proves calibrated or independently verified physical sensors. `temperature_interface_available` can be true while `monitoring_available` is false. Doctor reports `limited` for partial monitoring and lists rejected rows in `sensor_issues` with structured warnings.
+
+The declared -40–150°C bounds are broad software plausibility checks, not Apple hardware limits or a safe operating range. A 115.6°C reading can pass while its physical meaning remains unknown. SMC keys and IOHID names have unverified physical locations; do not relabel them as CPU/GPU temperatures without evidence. No fans on a fanless Mac is a valid result. Do not present `--demo` output as hardware observations.
+
+For a user-requested upgrade, repeat the installation flow to update the app, CLI and this bundled skill together. Preserve customized skills; report installer conflicts instead of overwriting them. Confirm `--version` and `schema` using the installed executable, then run read-only `doctor` and a short `watch`. Never claim the user's original anomalies are fixed on hardware solely from a simulated regression test.
 
 ## Control with user authorization
 

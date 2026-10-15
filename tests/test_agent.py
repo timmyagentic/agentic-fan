@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from macfan.agent import integrate, START
+from macfan import __version__
 from macfan.doctor import diagnose
 from macfan.errors import MacFanError
 
@@ -51,6 +52,20 @@ class AgentInstallTests(unittest.TestCase):
         self.assertFalse((self.root / ".local/bin/macfan").exists())
         self.assertFalse((self.root / ".zprofile").exists())
         self.assertEqual((destination / "SKILL.md").read_text(), "my own skill")
+
+    def test_upgrade_refreshes_unmodified_managed_skill_and_receipt(self):
+        old_skill = Path(self.temp.name) / "old-skill.md"
+        old_skill.write_text("Old MacFan sensor contract\n")
+        with patch("macfan.agent.SKILL", old_skill), patch("macfan.agent.__version__", "0.1.0"):
+            integrate(self.executable, self.root, "both")
+        profile = (self.root / ".zprofile").read_bytes()
+        result = integrate(self.executable, self.root, "both")
+        self.assertEqual(result["profiles_updated"], [])
+        self.assertEqual((self.root / ".zprofile").read_bytes(), profile)
+        for folder in (".agents", ".claude"):
+            directory = self.root / folder / "skills/macfan"
+            self.assertIn("schema_version: 2", (directory / "SKILL.md").read_text())
+            self.assertEqual(json.loads((directory / "installation.json").read_text())["version"], __version__)
 
     def test_existing_cli_is_not_replaced(self):
         binary = self.root / ".local/bin/macfan"
