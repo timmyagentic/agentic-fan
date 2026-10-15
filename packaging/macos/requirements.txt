@@ -1,0 +1,2 @@
+# Build tool only. The application carries its Python/Tk runtime.
+pyinstaller==6.22.3

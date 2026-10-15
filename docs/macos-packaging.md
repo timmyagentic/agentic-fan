@@ -1,0 +1,49 @@
+# Mac 应用与 DMG 构建
+
+交付物为 `MacFan.app`，放在真正的 UDZO/HFS+ DMG 中，附带指向 `/Applications` 的拖放安装链接。应用携带 Python、Tk 和全部 Python 模块；终端、Agent 与 GUI 都使用 `Contents/MacOS/macfan`。不要求用户安装 Python 或 pip。
+
+## 在 Apple Silicon Mac 构建
+
+需要 macOS 15+、带 Tk 的 arm64 Python 3.12、Xcode Command Line Tools 和可用的桌面会话。不要使用 Rosetta 下的 x86_64 Python。
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r packaging/macos/requirements.txt
+.venv/bin/python -m unittest discover -v
+.venv/bin/python packaging/macos/build.py --output dist/macos
+```
+
+默认产物：
+
+- `MacFan-0.1.0-arm64-dev.dmg`：ad-hoc 签名、未经公证的开发包。
+- 同名 `.dmg.sha256`：完整 DMG 的 SHA-256。
+- 同名前缀 `.build.json`：工具版本、架构、签名、公证状态与完成的打包检查。
+
+构建器拒绝 Linux、Intel 和已存在的目标 DMG。重新构建请指定新的输出目录。构建产物受 `.gitignore` 排除，不应提交到源码仓库。
+
+## 构建检查
+
+构建器会检查应用签名，并从源码目录之外运行内置 CLI 的 `schema`、模拟快照和有限控扇会话；后者必须返回自动模式恢复确认。随后启动窗口演示，检查传感器与风扇表格加载成功。生成 DMG 后，再验证、只读挂载磁盘镜像，核对应用与安装链接，并在挂载卷中重跑 CLI 和窗口检查。
+
+所有这些功能检查只操作显式模拟器，不改写构建机器的风扇。真实硬件读写仍需 [独立验收](hardware-validation.md)。直接启动内置可执行文件的检查也不能替代从 Finder 双击、管理员授权对话框、拖放安装和 Gatekeeper 的人工验收。
+
+## GitHub Actions
+
+`.github/workflows/macos-dmg.yml` 使用 GitHub 的 `macos-15` arm64 runner。相关代码推送或 PR 可触发构建，也支持手动运行。成功后在该次 Actions 的 **Artifacts** 中下载 `MacFan-Apple-Silicon-development-DMG`，解压得到 DMG 和校验信息。
+
+工作流只上传构建产物，不创建 Release、不自动发布软件，也不需要签名凭证。源代码提交、Actions 实际运行和构建成功是三个不同状态；本次 Linux 开发会话尚未运行该 macOS 流程。
+
+## 正式签名与公证
+
+在受信任的 Mac 构建机钥匙串中安装自己的 **Developer ID Application** 证书，并通过 Apple `notarytool store-credentials` 保存公证凭证。不要把证书私钥或口令写入仓库。
+
+```sh
+.venv/bin/python packaging/macos/build.py \
+  --identity 'Developer ID Application: Your Name (TEAMID)' \
+  --notary-profile 'macfan-notary' \
+  --output dist/release
+```
+
+此模式启用 hardened runtime，签名应用内部二进制和外层 bundle，分别提交应用与 DMG 公证并装订票据；成功后输出不含 `-dev` 的 DMG。只传 `--identity` 而没有公证配置时，产物名带 `-signed-unnotarized`。当前会话未执行正式签名或公证。
+
+开发包可能被 Gatekeeper 拦截，不应被描述为已经具备正式分发体验。应在一台未参与构建的 Mac 上验收下载、安装、授权、Agent 调用和卸载流程。

@@ -1,0 +1,111 @@
+# MacFan — Mac 温度与风扇应用，内置 Agent CLI
+
+MVP 提供两个核心能力：读取温度传感器；在有限时长内设置风扇转速并恢复自动控制。面向 Apple Silicon，交付格式为 **DMG 内的 `MacFan.app`**，内含窗口、CLI 和所需运行时。用户不需要安装 Python，也不需要模型、API Key 或网络服务。
+
+**当前状态：已提供桌面入口和 macOS DMG 构建流程；本次开发环境为 Linux，尚未生成或验收 Mac DMG。** Linux 可验证模拟器、协议和控制生命周期；真实 Apple Silicon 读写与各机型兼容性仍须按 [硬件验收清单](docs/hardware-validation.md) 验证。模拟测试通过不能证明硬件控制有效。
+
+## 安装与运行
+
+DMG 构建目标为 **Apple Silicon、macOS 15+**。取得构建产物后：
+
+1. 打开 `MacFan-0.1.0-arm64-dev.dmg`，把 `MacFan.app` 拖入 `Applications`。
+2. 双击应用，查看温度测点、风扇转速和模式。
+3. 选择风扇、目标 RPM 与持续秒数，点击设置；硬件写入时由 macOS 请求管理员授权。也可以点击“全部恢复自动”。
+
+默认 CI 产物是 ad-hoc 签名的开发包，**未经 Apple 公证**，下载后可能被 Gatekeeper 拦截。正式分发需要 Developer ID 签名与公证；构建方法见 [macOS 打包说明](docs/macos-packaging.md)。仓库中的 Python 包仅用于开发，不是面向用户的安装包。
+
+应用内置的 CLI 可直接供终端和 Agent 使用，默认输出 JSON，持续监控与控扇会话输出 NDJSON：
+
+```sh
+"/Applications/MacFan.app/Contents/MacOS/macfan" schema
+"/Applications/MacFan.app/Contents/MacOS/macfan" capabilities
+"/Applications/MacFan.app/Contents/MacOS/macfan" sensors
+"/Applications/MacFan.app/Contents/MacOS/macfan" fans
+"/Applications/MacFan.app/Contents/MacOS/macfan" watch --interval 1 --count 10
+```
+
+读取不要求管理员权限。通过 CLI 进行真实风扇写入，需要通过 `sudo` 显式运行同一工具。先读取 `fans` 返回的每个风扇的 `min_rpm`、`max_rpm` 和当前模式，再选择范围内的正整数 RPM；下面的 3000 只是示例值。
+
+```sh
+sudo "/Applications/MacFan.app/Contents/MacOS/macfan" fans set --fan 0 --rpm 3000 --duration 30
+sudo "/Applications/MacFan.app/Contents/MacOS/macfan" fans auto --fan all
+```
+
+`fans set` 是**前台、有期限的会话**，不是永久设置。最多 3600 秒，必须明确指定 `--duration`。它依次输出目标已写入、实际 RPM 已达到容差、自动模式已恢复等事件。Ctrl-C 可以提前结束。另一终端运行 `fans auto` 也能结束相应控制。重复 `--fan` 可同时控制多个风扇，或使用 `--fan all`；所有选中风扇的范围会在第一次写入前检查。
+
+## 无硬件演示
+
+```sh
+"/Applications/MacFan.app/Contents/MacOS/macfan" --gui --demo
+"/Applications/MacFan.app/Contents/MacOS/macfan" --demo snapshot
+```
+
+在源码目录开发时，Python 3.10+ 可运行相同核心逻辑；Linux 也支持显式的 `--demo` 模拟模式：
+
+```sh
+python3 -m macfan --demo snapshot
+python3 -m macfan --demo watch --interval 1 --count 3
+python3 -m macfan --demo fans set --fan all --rpm 3000 --duration 3
+python3 -m macfan --demo fans
+```
+
+全局选项 `--demo` 必须放在命令前。模拟输出总是含 `"simulated": true`，绝不因原生访问失败而自动回退。模拟状态保存在当前用户私有临时目录；测试可用 `MACFAN_DEMO_DIR` 指定独立目录。这一变量不影响真实硬件的运行目录。
+
+## Agent 接口
+
+| 命令 | 用途 | 权限/输出 |
+| --- | --- | --- |
+| `schema` | 命令、参数、单位、事件语义与错误码 | 不需要硬件，单个 JSON |
+| `capabilities` | 机型、架构、数据源、风扇及可用控制键 | 只读，单个 JSON |
+| `sensors [--source all/smc/iohid]` | 温度读数、来源、时间戳和状态 | 只读，单个 JSON |
+| `fans [list]` | 当前/目标/最低/最高 RPM、模式 | 只读，单个 JSON |
+| `snapshot` | 一次采集温度与风扇 | 只读，单个 JSON |
+| `watch --interval N [--count N]` | 连续快照 | 只读，NDJSON |
+| `fans set --fan ID --rpm N --duration N` | 有时限的固定转速 | 硬件写入需要 root，NDJSON |
+| `fans auto --fan ID` | 恢复自动，`ID` 也可为 `all` | 硬件写入需要 root，单个 JSON |
+
+成功输出的公共字段为 `schema_version`、`ok`、`simulated`、`timestamp`、`data`；错误输出用 `error` 提供稳定的 `code`、可读 `message` 和 `details`。机器调用应同时检查 `ok` 和进程退出码。`--help` 与 `--version` 为常规文本输出。
+
+读取的 `ok: true` 表示采集命令成功，不代表每个测点都有效。检查 `partial`、每个传感器的 `status` 和每个风扇的 `errors`。`control_available` 表示键、类型与范围具备调用条件，不等于通过真机验证。
+
+Agent 建议流程与流式消费示例见 [docs/agent-interface.md](docs/agent-interface.md)。应用的“AI native”体现在可发现、可组合、带明确权限和生命周期的接口；这个 MVP 不包含聊天界面或自主温控模型。
+
+## 原生能力与边界
+
+- 通过 IOKit AppleSMC 枚举 `T*` 温度类型键，并按每个键自身的 `sp78` 或 `flt ` 元数据解码；读取过程不改写任何键。
+- 通过 IOHID 温度事件读取包括初代 M1 在内的可用测点。私有接口可能受 macOS 版本或访问策略影响；不可用会明确返回警告。
+- 不复制商业应用的 XML 数据库。SMC 测点以原始键名标识，不声称已确认物理位置，也不保证所有 `T*` 键都是独立物理测点。IOHID ID 在本次系统启动内有效。
+- 保留读数来源与时间戳；失败值为 `null`，零值标为 `unverified`。不补造休眠核心温度，不做未经定义的“核心平均温度”。
+- 支持按键探测的 `F{i}Md` / `F{i}md` 模式、`flt ` / `fpe2` RPM，以及 Intel 的 `FS! ` 位图。Intel 路径也未经真机验收。
+- 无风扇设备可以监控温度，不能设置风扇。暂不包含 SMART 磁盘、GPU 厂商私有接口、预设或温度曲线。
+
+部分新机型可能需要全局 `Ftst` 路径。只有明确指定 `--experimental-ftst` 才会写入它；它要求所有风扇原先处于自动模式且 `Ftst` 为零。该路径未经真机验证，不能当作通用兼容承诺。恢复时仅在所有风扇都处于自动模式后清除它。若常规 `fans auto` 检测到它仍非零，会报告恢复未完成；显式恢复的形式为：
+
+```sh
+sudo "/Applications/MacFan.app/Contents/MacOS/macfan" fans auto --fan all --experimental-ftst
+```
+
+## 控制生命周期
+
+独立进程执行整个写入与恢复过程，CLI 通过保持管道打开维持会话。独立进程使用单调时钟和墙上时钟检查时限；在管道 EOF（包括 CLI 被 SIGKILL）、正常取消、读写故障或采样间隔异常后尝试恢复自动，并读回模式验证。选中风扇已处于手动模式时拒绝接管。
+
+目标写入与实际 RPM 到达是两个事件：必须在最多 15 秒或更短的会话时长内，观察到所有选中风扇达到 `max(100 RPM, 目标值的 8%)` 容差，否则恢复并报错。此检查不能证明整机散热效果。
+
+锁只协调本工具，不协调其他风扇应用；验收与使用时应避免多个控制程序同时运行。杀死独立控制进程、内核调用永久阻塞、系统崩溃、固件行为或其他控制程序竞争，都可能妨碍恢复。MVP 未安装 launchd 服务，也没有睡眠前通知处理；检测到恢复运行后的采样间隔异常会结束会话。不要把它当作硬件热保护机制。
+
+真实写入的运行锁在 root 私有的 `/var/run/macfan`。程序不创建公开 root RPC、配置免密 sudo、提供任意 SMC 键写入命令或访问网络。
+
+桌面窗口在控扇操作期间要求先恢复或等待会话结束再正常退出。GUI 经系统授权启动独立 CLI；强制结束窗口不等于取消该 CLI，已有会话可能运行至指定时限。期限与恢复逻辑仍由控扇进程执行。
+
+## 开发验证
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install .
+python3 -m unittest discover -v
+python3 -m macfan --gui --demo
+```
+
+窗口开发需要 Python 带有 Tk 和可用的图形桌面。修改代码后，在仓库根目录通过 `python3 -m macfan` 运行当前代码，或重新安装开发包。
+
+测试覆盖实际 CLI 子进程、读取协议、混合类型解码、部分写入失败、实际 RPM 未响应、并发控制、过期恢复以及父进程 SIGTERM/SIGKILL 后的恢复。DMG 流程另外检查独立运行时、窗口演示启动、应用签名与挂载后运行。硬件测试结果应单独记录；CI 的 macOS 虚拟机也不能代表真实 Mac SMC。

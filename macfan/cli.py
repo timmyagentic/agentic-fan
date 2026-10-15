@@ -1,0 +1,203 @@
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import platform
+import signal
+import subprocess
+import sys
+import time
+
+from . import __version__
+from .errors import MacFanError, invalid
+from .guardian import validate_duration
+from .hardware import native_hardware
+from .manifest import MANIFEST
+from .launch import guardian_command
+from .protocol import emit, failure, success
+from .runtime import lock, runtime_directory
+
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        raise invalid(message)
+
+
+def parser():
+    root = Parser(description="Local JSON-first Mac sensor monitoring and bounded fan control. Global options precede commands.",
+                  epilog="Launch the desktop window separately with --gui (optionally --demo).")
+    root.add_argument("--version", action="version", version=__version__)
+    root.add_argument("--demo", action="store_true", help="use explicit synthetic hardware")
+    commands = root.add_subparsers(dest="command", required=True)
+    commands.add_parser("schema", help="print the machine-readable command contract")
+    commands.add_parser("capabilities", help="inspect available hardware interfaces")
+    sensors = commands.add_parser("sensors", help="read raw temperature sensors")
+    sensors.add_argument("--source", choices=("all", "smc", "iohid"), default="all")
+    commands.add_parser("snapshot", help="read temperatures and fan state")
+    watch = commands.add_parser("watch", help="stream snapshots as NDJSON")
+    watch.add_argument("--interval", type=float, default=1, help="seconds between samples (0.2..3600)")
+    watch.add_argument("--count", type=int, help="stop after this many samples")
+    fans = commands.add_parser("fans", help="inspect or control fans")
+    actions = fans.add_subparsers(dest="action")
+    actions.add_parser("list", help="read fan state (default)")
+    set_fan = actions.add_parser("set", help="hold fixed RPM for a bounded foreground session, then restore auto")
+    auto = actions.add_parser("auto", help="restore automatic control, including during a live session")
+    for command in (set_fan, auto):
+        command.add_argument("--fan", action="append", required=True, help="zero-based ID; repeat for several fans, or use all")
+        command.add_argument("--experimental-ftst", action="store_true", help="explicitly enable unverified global Ftst protocol")
+    set_fan.add_argument("--rpm", type=int, required=True)
+    set_fan.add_argument("--duration", type=float, required=True, help="session duration in seconds (1..3600)")
+    return root
+
+
+def select_fans(selection, count):
+    if selection == ["all"]:
+        indices = list(range(count))
+    else:
+        try:
+            indices = [int(value) for value in selection]
+        except ValueError:
+            raise invalid("Use integer fan IDs or --fan all.") from None
+    if not indices or len(set(indices)) != len(indices) or any(i < 0 or i >= count for i in indices):
+        raise invalid("Select existing, distinct fan IDs; this machine may have no fans.", fan_count=count)
+    return indices
+
+
+def snapshot(hw):
+    sensors = hw.temperatures()
+    fans = hw.fans()
+    return {"sensors": sensors, "fans": fans, "warnings": hw.warnings,
+            "partial": not sensors or any(x["status"] != "ok" for x in sensors) or any(x["errors"] for x in fans)}
+
+
+def control_process(config):
+    process = subprocess.Popen(guardian_command(), stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, text=True, start_new_session=True)
+    interrupted = False
+    last_message = None
+    old_handler = signal.getsignal(signal.SIGTERM)
+
+    def forward(line):
+        nonlocal last_message
+        last_message = json.loads(line)
+        sys.stdout.write(line)
+        sys.stdout.flush()
+
+    def stop(signum, frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, stop)
+    try:
+        process.stdin.write(json.dumps(config) + "\n")
+        process.stdin.flush()
+        for line in process.stdout:
+            forward(line)
+    except KeyboardInterrupt:
+        interrupted = True
+        process.stdin.close()
+        # Continue consuming the restoration result. A second Ctrl-C may leave
+        # the isolated guardian running, with stdin closed and its own deadline.
+        for line in process.stdout:
+            forward(line)
+    finally:
+        signal.signal(signal.SIGTERM, old_handler)
+        if not process.stdin.closed:
+            process.stdin.close()
+        process.stdout.close()
+        # Never terminate the guardian on a parent timeout: that would suppress
+        # restoration. It observes EOF even if this process is killed.
+    result = process.wait()
+    if result < 0 or (not interrupted and (not last_message or
+            (last_message.get("ok") and last_message.get("event") != "control_finished"))):
+        emit(failure(MacFanError("RESTORE_UNCONFIRMED", "The control process exited without a verified restoration result. Run fans auto and inspect the hardware.",
+                                7, guardian_exit_status=result), config["demo"]))
+        return 7
+    return 130 if interrupted and result == 0 else result
+
+
+def main(argv=None):
+    hw = None
+    args = None
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    try:
+        args = parser().parse_args(raw_args)
+        if args.command == "schema":
+            emit(success(MANIFEST, args.demo))
+            return 0
+        if args.command == "watch":
+            if not math.isfinite(args.interval) or not 0.2 <= args.interval <= 3600:
+                raise invalid("Watch interval must be finite and between 0.2 and 3600 seconds.")
+            if args.count is not None and args.count < 1:
+                raise invalid("Count must be positive.")
+        writing = args.command == "fans" and args.action in ("set", "auto")
+        if writing and not args.demo and os.geteuid() != 0:
+            raise MacFanError("PERMISSION_DENIED", "Fan writes require sudo. Read commands work without it.", 4)
+        if args.command == "fans" and args.action == "set":
+            validate_duration(args.duration)
+        if args.demo:
+            from .demo import demo_hardware
+            hw = demo_hardware()
+        else:
+            hw = native_hardware(include_temperatures=args.command != "fans")
+        if args.command == "fans":
+            if args.action in ("set", "auto"):
+                indices = select_fans(args.fan, hw.count())
+                if args.action == "set":
+                    hw.close()
+                    hw = None
+                    return control_process({"fans": indices, "rpm": args.rpm, "duration": args.duration,
+                                            "demo": args.demo, "experimental_ftst": args.experimental_ftst})
+                with lock(runtime_directory(args.demo), "write.lock"):
+                    hw.restore(indices, args.experimental_ftst)
+                emit(success({"fans": indices, "automatic_mode_verified": True}, args.demo))
+            else:
+                emit(success({"fans": hw.fans(), "warnings": hw.warnings}, args.demo))
+        elif args.command == "sensors":
+            sensors = [row for row in hw.temperatures() if args.source in ("all", row["source"])]
+            if not sensors:
+                raise MacFanError("NO_TEMPERATURE_SENSORS", "No readable temperature interfaces were discovered for this source.", 3, warnings=hw.warnings)
+            emit(success({"sensors": sensors, "warnings": hw.warnings,
+                          "partial": any(row["status"] != "ok" for row in sensors)}, args.demo))
+        elif args.command == "snapshot":
+            emit(success(snapshot(hw), args.demo))
+        elif args.command == "capabilities":
+            sensors = hw.temperatures()
+            fans = hw.fans()
+            model = None
+            if sys.platform == "darwin" and not args.demo:
+                result = subprocess.run(["/usr/sbin/sysctl", "-n", "hw.model"], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    model = result.stdout.strip()
+            emit(success({"platform": sys.platform, "architecture": platform.machine(),
+                          "os_version": platform.mac_ver()[0] if sys.platform == "darwin" else platform.release(),
+                          "model": model, "sensor_count": len(sensors), "fan_count": len(fans),
+                          "temperature_sources": sorted({row["source"] for row in sensors}),
+                          "fans": fans, "write_requires_root": not args.demo,
+                          "running_as_root": os.geteuid() == 0, "warnings": hw.warnings,
+                          "experimental_ftst_present": hw.optional_info("Ftst") is not None}, args.demo))
+        elif args.command == "watch":
+            count = 0
+            while args.count is None or count < args.count:
+                started = time.monotonic()
+                emit(success(snapshot(hw), args.demo, "sample"))
+                count += 1
+                if args.count is None or count < args.count:
+                    time.sleep(max(0, args.interval - (time.monotonic() - started)))
+        return 0
+    except MacFanError as exc:
+        emit(failure(exc, args.demo if args else "--demo" in raw_args))
+        return exc.exit_code
+    except KeyboardInterrupt:
+        return 130
+    except BrokenPipeError:
+        # The control subprocess sees EOF and restores independently.
+        sys.stdout = open(os.devnull, "w")
+        return 0
+    except (OSError, ValueError) as exc:
+        emit(failure(MacFanError("IO_ERROR", str(exc)), args.demo if args else False))
+        return 5
+    finally:
+        if hw:
+            hw.close()

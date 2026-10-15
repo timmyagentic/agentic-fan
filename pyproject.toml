@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-mac-fans-control"
+version = "0.1.0"
+description = "Mac temperature monitoring and bounded fan control with an agent-friendly JSON CLI"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+macfan = "macfan.entry:main"
+
+[tool.setuptools.packages.find]
+include = ["macfan*"]
