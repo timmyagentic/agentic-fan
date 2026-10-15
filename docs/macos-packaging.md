@@ -31,7 +31,9 @@ python3 -m venv .venv
 
 `.github/workflows/macos-dmg.yml` 使用 GitHub 的 `macos-15` arm64 runner。相关代码推送或 PR 可触发构建，也支持手动运行。成功后在该次 Actions 的 **Artifacts** 中下载 `MacFan-Apple-Silicon-development-DMG`，解压得到 DMG 和校验信息。
 
-工作流只上传构建产物，不创建 Release、不自动发布软件，也不需要签名凭证。源代码提交、Actions 实际运行和构建成功是三个不同状态；本次 Linux 开发会话尚未运行该 macOS 流程。
+工作流只上传构建产物，不创建 Release、不自动发布软件，也不需要签名凭证。首个版本已通过 [macOS 构建与镜像检查](https://github.com/timmyagentic/agentic-mac-fans-control/actions/runs/38715565877)；后续版本以对应提交的 Actions 日志为准。
+
+构建还会在临时用户目录中运行 `scripts/install-macos.sh`，检查 App 安装、CLI 软链接、Codex/Claude Code skill、shell 配置保留、重复安装及校验失败时的行为。独立的 `install-smoke.yml` 工作流可固定一个成功的构建 ID，验证从 GitHub 下载再安装的完整流程。这些检查不安装到 CI 用户的真实目录，也不调整真实风扇。
 
 ## 正式签名与公证
 

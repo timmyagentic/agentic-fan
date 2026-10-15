@@ -2,7 +2,19 @@
 
 MVP 提供两个核心能力：读取温度传感器；在有限时长内设置风扇转速并恢复自动控制。面向 Apple Silicon，交付格式为 **DMG 内的 `MacFan.app`**，内含窗口、CLI 和所需运行时。用户不需要安装 Python，也不需要模型、API Key 或网络服务。
 
-**当前状态：已提供桌面入口和 macOS DMG 构建流程；本次开发环境为 Linux，尚未生成或验收 Mac DMG。** Linux 可验证模拟器、协议和控制生命周期；真实 Apple Silicon 读写与各机型兼容性仍须按 [硬件验收清单](docs/hardware-validation.md) 验证。模拟测试通过不能证明硬件控制有效。
+**当前状态：macOS CI 已成功构建并挂载验证 DMG，应用窗口与内置 CLI 的模拟测试已通过。** 真实 Apple Silicon 读写与各机型兼容性仍须按 [硬件验收清单](docs/hardware-validation.md) 验证。模拟测试通过不能证明硬件控制有效。
+
+## 给 Agent 一句话安装
+
+> 帮我安装 https://github.com/timmyagentic/agentic-mac-fans-control ，按照 INSTALL.md 安装 MacFan App、CLI 和 Codex skill，最后检查温度和风扇接口。
+
+Agent 按 [INSTALL.md](INSTALL.md) 下载已构建的 DMG、校验安装包、安装 App、配置 `macfan` 命令和 skill，再运行只读诊断。也支持 Claude Code 或两者同时安装。安装器默认使用 `~/Applications`，不需要 Python 或本地编译。
+
+```sh
+bash scripts/install-macos.sh --agent codex
+```
+
+该命令需要先取得本仓库，并有可访问仓库的 `gh` 登录；也可以用 `--dmg PATH` 安装已下载的包。当前开发版尚未经过 Apple 公证，系统可能要求用户确认打开。下载安装包的入口见 [macOS DMG 构建记录](https://github.com/timmyagentic/agentic-mac-fans-control/actions/workflows/macos-dmg.yml)。
 
 ## 安装与运行
 
@@ -56,6 +68,8 @@ python3 -m macfan --demo fans
 | 命令 | 用途 | 权限/输出 |
 | --- | --- | --- |
 | `schema` | 命令、参数、单位、事件语义与错误码 | 不需要硬件，单个 JSON |
+| `doctor` | 安装与硬件只读诊断 | 检查报告中的可用状态，单个 JSON |
+| `agent install --target codex/claude/both` | 配置当前用户的 CLI、PATH 和 skill | 从 App 内运行，用户配置写入，不改动风扇 |
 | `capabilities` | 机型、架构、数据源、风扇及可用控制键 | 只读，单个 JSON |
 | `sensors [--source all/smc/iohid]` | 温度读数、来源、时间戳和状态 | 只读，单个 JSON |
 | `fans [list]` | 当前/目标/最低/最高 RPM、模式 | 只读，单个 JSON |
@@ -69,6 +83,8 @@ python3 -m macfan --demo fans
 读取的 `ok: true` 表示采集命令成功，不代表每个测点都有效。检查 `partial`、每个传感器的 `status` 和每个风扇的 `errors`。`control_available` 表示键、类型与范围具备调用条件，不等于通过真机验证。
 
 Agent 建议流程与流式消费示例见 [docs/agent-interface.md](docs/agent-interface.md)。应用的“AI native”体现在可发现、可组合、带明确权限和生命周期的接口；这个 MVP 不包含聊天界面或自主温控模型。
+
+可安装的 [macfan skill](macfan/agent_skill/SKILL.md) 将发现命令、诊断、监控、有限控扇和恢复自动模式连成 Agent 工作流程。它随 App 一起打包；安装器将它放入所选 Agent 的用户 skill 目录。
 
 ## 原生能力与边界
 

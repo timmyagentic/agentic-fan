@@ -15,3 +15,6 @@ macfan = "macfan.entry:main"
 
 [tool.setuptools.packages.find]
 include = ["macfan*"]
+
+[tool.setuptools.package-data]
+macfan = ["agent_skill/*.md"]

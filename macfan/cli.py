@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import os
+from pathlib import Path
 import platform
 import signal
 import subprocess
@@ -33,6 +34,12 @@ def parser():
     commands = root.add_subparsers(dest="command", required=True)
     commands.add_parser("schema", help="print the machine-readable command contract")
     commands.add_parser("capabilities", help="inspect available hardware interfaces")
+    commands.add_parser("doctor", help="produce read-only installation and hardware diagnostics")
+    agent = commands.add_parser("agent", help="install the user-local CLI and Agent skill")
+    integration = agent.add_subparsers(dest="agent_action", required=True)
+    install = integration.add_parser("install", help="configure this bundled app for Codex or Claude Code")
+    install.add_argument("--target", choices=("codex", "claude", "both"), default="codex")
+    install.add_argument("--user-root", type=Path, default=Path.home(), help="user directory (defaults to the current home)")
     sensors = commands.add_parser("sensors", help="read raw temperature sensors")
     sensors.add_argument("--source", choices=("all", "smc", "iohid"), default="all")
     commands.add_parser("snapshot", help="read temperatures and fan state")
@@ -125,6 +132,20 @@ def main(argv=None):
         args = parser().parse_args(raw_args)
         if args.command == "schema":
             emit(success(MANIFEST, args.demo))
+            return 0
+        if args.command == "doctor":
+            from .doctor import diagnose
+            emit(success(diagnose(args.demo), args.demo))
+            return 0
+        if args.command == "agent":
+            if args.demo:
+                raise invalid("Agent installation cannot be combined with --demo.")
+            if os.geteuid() == 0:
+                raise invalid("Install Agent integration as the current user, without sudo.")
+            if not getattr(sys, "frozen", False):
+                raise invalid("Run agent install using the executable inside the installed MacFan.app.")
+            from .agent import integrate
+            emit(success(integrate(Path(sys.executable), args.user_root, args.target)))
             return 0
         if args.command == "watch":
             if not math.isfinite(args.interval) or not 0.2 <= args.interval <= 3600:

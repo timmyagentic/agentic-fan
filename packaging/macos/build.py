@@ -139,6 +139,8 @@ def main(argv=None):
         "hardware_verified": False, "sha256": digest,
     }
     dmg.with_suffix(".build.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    shutil.copy2(ROOT / "scripts/install-macos.sh", output / "install-macos.sh")
+    shutil.copy2(ROOT / "INSTALL.md", output / "INSTALL.md")
     print(dmg)
     return 0
 

@@ -4,6 +4,10 @@
 
 通过 DMG 安装后，可执行文件路径为 `/Applications/MacFan.app/Contents/MacOS/macfan`，无需 Python 环境。传入显式命令会进入 CLI；不带参数打开窗口。`--gui` 可以显式打开窗口。
 
+通过 [Agent 安装入口](../INSTALL.md) 安装时，App 默认位于 `~/Applications`，CLI 位于 `~/.local/bin/macfan`。Codex 的 `~/.agents/skills/macfan` 或 Claude Code 的 `~/.claude/skills/macfan` 中会安装 skill 及记录绝对可执行文件路径的 `installation.json`。当前进程可直接使用绝对路径，无需等待 PATH 更新。
+
+`doctor` 总是尽可能返回结构化诊断。`ok: true` 表示诊断完成，实际可用性由 `data.status`、`monitoring_available`、`control_interface_available` 和 `errors` 表示。诊断不会触发管理员授权或风扇写入；`hardware_write_tested` 为 `false`。正常安装不需要用一次真实风扇写入来“测试权限”。
+
 建议顺序：
 
 1. 调用 `capabilities`，确认平台、风扇数量、读数来源和错误。

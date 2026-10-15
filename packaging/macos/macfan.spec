@@ -9,7 +9,7 @@ analysis = Analysis(
     [str(root / "packaging" / "macos" / "launcher.py")],
     pathex=[str(root)],
     binaries=[],
-    datas=[],
+    datas=[(str(root / "macfan/agent_skill"), "macfan/agent_skill")],
     hiddenimports=[],
     hookspath=[],
     runtime_hooks=[],

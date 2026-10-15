@@ -10,6 +10,11 @@ MANIFEST = {
     "commands": [
         {"command": "schema", "effect": "read", "stream": False, "hardware_required": False},
         {"command": "capabilities", "effect": "read", "stream": False},
+        {"command": "doctor", "effect": "read", "stream": False,
+         "description": "Always produces a diagnostic report if it can run; inspect data.status and monitoring_available, not just ok."},
+        {"command": "agent install", "effect": "user_configuration_write", "stream": False, "hardware_required": False,
+         "options": {"--target": {"enum": ["codex", "claude", "both"], "default": "codex"},
+                     "--user-root": {"type": "string", "description": "User home containing .local/bin and Agent skill directories."}}},
         {"command": "sensors", "effect": "read", "stream": False,
          "options": {"--source": {"enum": ["all", "smc", "iohid"], "default": "all"}}},
         {"command": "fans list", "effect": "read", "stream": False},
