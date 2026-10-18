@@ -1,2 +1,2 @@
-# Build tool only. The application carries its Python/Tk runtime.
+# Build tool only. The application carries its Python runtime and a compiled SwiftUI executable.
 pyinstaller==6.22.3

@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'macfan/**'
+      - 'native/**'
       - 'packaging/macos/**'
       - 'scripts/install-macos.sh'
       - 'INSTALL.md'
@@ -13,6 +14,7 @@ on:
   pull_request:
     paths:
       - 'macfan/**'
+      - 'native/**'
       - 'packaging/macos/**'
       - 'scripts/install-macos.sh'
       - 'INSTALL.md'

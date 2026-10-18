@@ -2,7 +2,7 @@
 
 MVP 提供两个核心能力：读取温度传感器；在有限时长内设置风扇转速并恢复自动控制。面向 Apple Silicon，交付格式为 **DMG 内的 `MacFan.app`**，内含窗口、CLI 和所需运行时。用户不需要安装 Python，也不需要模型、API Key 或网络服务。
 
-**0.3.1：温度界面增加中文部件分组、主要温度概览和高级原始视图。** 本机 M4 的 65 个测点可识别为 CPU、GPU、内存、SSD、无线网络与电源管理，其余测点保留为未知。命名依据与范围见 [传感器名称说明](docs/sensor-labels.md)。首次授权安装 Helper 后，Agent 无需 sudo 或重复弹窗即可控扇。 修复 SMC 异步读回导致的调速/恢复误报。已在 Mac16,10、macOS 27.0 上验证 1600 RPM 短时调速、到期恢复、主动恢复与 CLI 被终止后的恢复；其他机型、睡眠及 Ftst 路径仍未验收。详见 [硬件验收记录](docs/hardware-validation.md) 和 [温度有效性说明](docs/temperature-validation.md)。
+**0.4.0：原生 SwiftUI 主窗口与菜单栏弹窗。** 紧凑双栏、搜索与测点详情、有限时调速弹窗、实际/目标转速和倒计时共用同一条后台数据流。关闭主窗口后在菜单栏继续运行；退出前如有本应用发起的调速，须确认恢复自动模式。 本机 M4 的 65 个测点可识别为 CPU、GPU、内存、SSD、无线网络与电源管理，其余测点保留为未知。命名依据与范围见 [传感器名称说明](docs/sensor-labels.md)。首次授权安装 Helper 后，Agent 无需 sudo 或重复弹窗即可控扇。 修复 SMC 异步读回导致的调速/恢复误报。已在 Mac16,10、macOS 27.0 上验证 1600 RPM 短时调速、到期恢复、主动恢复与 CLI 被终止后的恢复；其他机型、睡眠及 Ftst 路径仍未验收。详见 [硬件验收记录](docs/hardware-validation.md) 和 [温度有效性说明](docs/temperature-validation.md)。
 
 ## 给 Agent 一句话安装
 
@@ -20,7 +20,7 @@ bash scripts/install-macos.sh --agent codex
 
 DMG 构建目标为 **Apple Silicon、macOS 15+**。取得构建产物后：
 
-1. 打开 `MacFan-0.3.1-arm64-dev.dmg`，把 `MacFan.app` 拖入 `Applications`。
+1. 打开 `MacFan-0.4.0-arm64-dev.dmg`，把 `MacFan.app` 拖入 `Applications`。
 2. 双击应用，查看温度测点、风扇转速和模式。
 3. 选择风扇、目标 RPM 与持续秒数，点击设置；首次控扇时由 macOS 请求管理员授权安装 Helper，后续无需重复授权。也可以点击“全部恢复自动”。
 
@@ -81,7 +81,7 @@ python3 -m macfan --demo fans
 
 成功输出的公共字段为 `schema_version`、`ok`、`simulated`、`timestamp`、`data`；错误输出用 `error` 提供稳定的 `code`、可读 `message` 和 `details`。机器调用应同时检查 `ok` 和进程退出码。`--help` 与 `--version` 为常规文本输出。
 
-读取的 `ok: true` 表示采集命令成功，不代表每个测点都有效。0.3.1 沿用 **JSON 协议 v2**：只有传感器 `status=ok` 时 `value` 才是可采用的数值，其余为 `null`；异常与零值保留在 `raw_value`。检查 `sensor_summary`、`partial`、每个传感器的 `reason` 和每个风扇的 `errors`。`doctor` 区分接口可读与数据可用，异常、待确认和不可用项有独立计数及警告。`control_available` 表示键、类型与范围具备调用条件，不等于通过真机验证。
+读取的 `ok: true` 表示采集命令成功，不代表每个测点都有效。0.4.0 沿用 **JSON 协议 v2**：只有传感器 `status=ok` 时 `value` 才是可采用的数值，其余为 `null`；异常与零值保留在 `raw_value`。检查 `sensor_summary`、`partial`、每个传感器的 `reason` 和每个风扇的 `errors`。`doctor` 区分接口可读与数据可用，异常、待确认和不可用项有独立计数及警告。`control_available` 表示键、类型与范围具备调用条件，不等于通过真机验证。
 
 Agent 建议流程与流式消费示例见 [docs/agent-interface.md](docs/agent-interface.md)。应用的“AI native”体现在可发现、可组合、带明确权限和生命周期的接口；这个 MVP 不包含聊天界面或自主温控模型。
 
@@ -112,7 +112,7 @@ SMC 模式和目标值可能异步生效；每步最多等待 3 秒读回，超�
 
 真实写入的运行锁在 root 私有的 `/var/run/macfan`。Helper 文件为 root 所有，socket 仅对安装时授权的本机 UID 开放，并通过内核凭据复核调用者。接口仅包含状态、有限控扇和恢复，不接受命令、程序路径或任意 SMC 键；不配置免密 sudo，不访问网络。详情见 [Helper 与权限边界](docs/helper.md)。
 
-桌面窗口在控扇操作期间要求先恢复或等待会话结束再正常退出。GUI 首次安装 Helper 后启动普通权限 CLI；强制结束窗口不等于取消该 CLI，已有会话可能运行至指定时限。期限与恢复逻辑仍由控扇进程执行。
+关闭主窗口后，控扇会话继续在菜单栏运行。正常退出应用时，如有本应用发起且尚未确认恢复的控扇会话，会先要求恢复自动模式。GUI 首次安装 Helper 后启动普通权限 CLI；强制结束整个应用时，已有会话仍可能运行至指定时限。期限与恢复逻辑由独立控扇进程执行。
 
 ## 开发验证
 
@@ -120,9 +120,10 @@ SMC 模式和目标值可能异步生效；每步最多等待 3 秒读回，超�
 python3 -m venv .venv
 .venv/bin/python -m pip install .
 python3 -m unittest discover -v
+python3 packaging/macos/build_native.py
 python3 -m macfan --gui --demo
 ```
 
-窗口开发需要 Python 带有 Tk 和可用的图形桌面。修改代码后，在仓库根目录通过 `python3 -m macfan` 运行当前代码，或重新安装开发包。
+窗口开发需要 macOS 15+ 和 Xcode Command Line Tools。先运行 `python3 packaging/macos/build_native.py`，再运行 `python3 -m macfan --gui`；`--demo` 显式使用模拟数据。SwiftUI/AppKit 界面位于 `native/`，通过原有 JSON CLI 监测和控制，不直接写 SMC。CLI 在不加载任何 UI 的情况下独立工作。
 
 测试覆盖实际 CLI 子进程、读取协议、混合类型解码、部分写入失败、实际 RPM 未响应、并发控制、过期恢复以及父进程 SIGTERM/SIGKILL 后的恢复。DMG 流程另外检查独立运行时、窗口演示启动、应用签名与挂载后运行。硬件测试结果应单独记录；CI 的 macOS 虚拟机也不能代表真实 Mac SMC。

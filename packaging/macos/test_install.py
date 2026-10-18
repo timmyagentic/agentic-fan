@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import plistlib
 from pathlib import Path
 import subprocess
 import tempfile
@@ -38,6 +39,9 @@ def main():
         assert not messages[1]["data"]["hardware_write_tested"]
         print("Native diagnostic status:", messages[1]["data"]["status"])
         executable = user / "Applications/MacFan.app/Contents/MacOS/macfan"
+        info = plistlib.loads((user / "Applications/MacFan.app/Contents/Info.plist").read_bytes())
+        assert info["CFBundleExecutable"] == "MacFanUI", "Finder must launch the actual native app"
+        assert (executable.parent / "MacFanUI").is_file()
         binary = user / ".local/bin/macfan"
         assert binary.resolve() == executable.resolve()
         for folder in (".agents", ".claude"):

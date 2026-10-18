@@ -34,6 +34,21 @@ def run(*arguments, check=True):
     return subprocess.run([str(x) for x in arguments], check=check, capture_output=True, text=True)
 
 
+def stop_helper():
+    """bootout returns before launchd has removed the job; wait before replacing it."""
+    run('/bin/launchctl', 'bootout', 'system/' + LABEL, check=False)
+    deadline = time.monotonic() + 10
+    while True:
+        state = run('/bin/launchctl', 'print', 'system/' + LABEL, check=False)
+        if state.returncode in (3, 113):  # ESRCH / launchd service-not-found
+            return
+        if state.returncode != 0:
+            raise MacFanError('HELPER_STOP_FAILED', 'Cannot verify that the existing helper has stopped.', 4)
+        if time.monotonic() >= deadline:
+            raise MacFanError('HELPER_STOP_FAILED', 'The existing helper did not stop within ten seconds.', 4)
+        time.sleep(.1)
+
+
 def launch_config():
     return {'Label': LABEL, 'ProgramArguments': [str(EXECUTABLE), '--internal-helper'],
             'UserName': 'root', 'RunAtLoad': True, 'KeepAlive': True,
@@ -99,7 +114,7 @@ def install_privileged(uid):
             previous_config = CONFIG.read_bytes() if CONFIG.exists() else None
             previous_plist = PLIST.read_bytes() if PLIST.exists() else None
             if PLIST.exists(): check_root_path(PLIST)
-            run('/bin/launchctl', 'bootout', 'system/' + LABEL, check=False)
+            stop_helper()
             if APP.exists(): APP.rename(old)
             try:
                 staged.rename(APP)
@@ -118,7 +133,7 @@ def install_privileged(uid):
                     time.sleep(.2)
                 raise MacFanError('HELPER_START_FAILED', 'Installed helper did not become ready.')
             except Exception:
-                run('/bin/launchctl', 'bootout', 'system/' + LABEL, check=False)
+                stop_helper()
                 if APP.exists(): shutil.rmtree(APP)
                 if old.exists(): old.rename(APP)
                 if previous_config is not None: CONFIG.write_bytes(previous_config)
@@ -138,7 +153,7 @@ def uninstall_privileged(uid):
     if installed_owner() not in (None, uid):
         raise MacFanError('HELPER_ACCESS_DENIED', 'Helper belongs to another user.', 4)
     with lock(runtime_directory(False), 'session.lock', blocking=False):
-        run('/bin/launchctl', 'bootout', 'system/' + LABEL, check=False)
+        stop_helper()
         if PLIST.exists():
             check_root_path(PLIST)
             PLIST.unlink()

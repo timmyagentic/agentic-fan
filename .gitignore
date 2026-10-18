@@ -5,3 +5,6 @@ __pycache__/
 build/
 dist/
 .DS_Store
+
+# Local visual acceptance evidence
+/design-qa.md

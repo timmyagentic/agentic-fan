@@ -56,6 +56,8 @@ def smoke(executable: Path, directory: Path, gui=True):
         raise RuntimeError("Packaged app failed temperature-quality regression")
     if gui:
         run(executable, "--gui", "--demo", "--gui-smoke-test", cwd=directory, env=env, timeout=30)
+        # Also exercise the exact native entry selected by LaunchServices/Finder.
+        run(executable.parent / "MacFanUI", "--demo", "--smoke", cwd=directory, env=env, timeout=30)
 
 
 def notarize(path: Path, profile: str):
@@ -77,8 +79,6 @@ def main(argv=None):
     for tool in ("hdiutil", "codesign", "ditto", "xcrun"):
         if not shutil.which(tool):
             parser.error(f"Required macOS build tool is missing: {tool}")
-    # Fail before building if this Python installation lacks the UI runtime.
-    import tkinter  # noqa: F401
     import PyInstaller
 
     version = runpy.run_path(str(ROOT / "macfan" / "__init__.py"))["__version__"]
@@ -90,6 +90,8 @@ def main(argv=None):
         parser.error(f"Output already exists; choose a clean --output directory: {dmg}")
     with tempfile.TemporaryDirectory(prefix="macfan-build-") as temporary:
         work = Path(temporary).resolve()
+        from build_native import build as build_native
+        native = build_native(work / "MacFanUI")
         products = work / "products"
         env = dict(os.environ)
         env["PYINSTALLER_CONFIG_DIR"] = str(work / "pyinstaller-cache")
@@ -103,7 +105,16 @@ def main(argv=None):
         executable = app / "Contents/MacOS/macfan"
         if not executable.is_file():
             raise RuntimeError("PyInstaller did not produce the expected application bundle")
+        shutil.copy2(native, app / "Contents/MacOS/MacFanUI")
+        # The OS must register the actual Cocoa executable, not an exec() trampoline.
+        # Otherwise modern macOS rejects the status-item scene after Finder launch.
+        info_path = app / "Contents/Info.plist"
+        info = plistlib.loads(info_path.read_bytes())
+        info['CFBundleExecutable'] = 'MacFanUI'
+        info_path.write_bytes(plistlib.dumps(info))
         signing = ["--options", "runtime", "--timestamp"] if args.identity else []
+        run("codesign", "--force", "--sign", args.identity or "-", *signing, executable)
+        run("codesign", "--force", "--sign", args.identity or "-", *signing, app / "Contents/MacOS/MacFanUI")
         run("codesign", "--force", "--sign", args.identity or "-", *signing, app)
         run("codesign", "--verify", "--deep", "--strict", app)
         smoke(executable, work)
