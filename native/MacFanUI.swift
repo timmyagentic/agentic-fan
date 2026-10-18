@@ -474,7 +474,7 @@ struct MenuPanel: View {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static weak var instance: AppDelegate?
     private var statusItem: NSStatusItem?
-    private let popover = NSPopover()
+    private let popover = MenuPopover()
     private var subscription: AnyCancellable?
     private var mainWindow: NSWindow?
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -490,8 +490,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let host = NSHostingController(rootView: MenuPanel(model: Monitor.shared))
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
-        popover.behavior = .transient
-        popover.animates = false
         subscription = Monitor.shared.$snapshot.sink { [weak self] sample in
             self?.statusItem?.button?.title = " \(rpmText(sample?.fans.first?.actualRpm)) RPM · \(temperature(sample?.temperatureOverview.first { $0.group == "cpu" }?.value, precise: false))"
         }
