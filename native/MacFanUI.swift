@@ -552,6 +552,7 @@ struct MacFanApplication: App {
         Window("MacFan", id: "main") { MainView(model: model) }
             .windowResizability(.contentSize)
             .windowToolbarStyle(.unifiedCompact)
+            .windowStyle(.hiddenTitleBar)
             .commands { CommandGroup(replacing: .appSettings) { Button("设置…") { model.showSettings = true }.keyboardShortcut(",") } }
             .commands {
                 CommandGroup(after: .windowArrangement) {
