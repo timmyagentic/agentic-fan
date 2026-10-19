@@ -2,6 +2,8 @@
 
 交付物为 `MacFan.app`，放在真正的 UDZO/HFS+ DMG 中，附带指向 `/Applications` 的拖放安装链接。应用携带 Python、Tk 和全部 Python 模块；终端、Agent 与 GUI 都使用 `Contents/MacOS/macfan`。不要求用户安装 Python 或 pip。
 
+MacFan 常驻菜单栏，打开主窗口、关闭窗口和收起菜单栏弹窗时都不显示 Dock 图标，也不占用 Command-Tab 应用切换器。菜单栏保留“打开主窗口”和“退出”入口；主窗口关闭后继续监测。打包声明 `LSUIElement=true`，原生入口也使用 accessory 激活策略，菜单栏弹窗不会再将应用切回普通 Dock 应用。
+
 ## 在 Apple Silicon Mac 构建
 
 需要 macOS 15+、带 Tk 的 arm64 Python 3.12、Xcode Command Line Tools 和可用的桌面会话。不要使用 Rosetta 下的 x86_64 Python。
