@@ -19,6 +19,7 @@ import stat
 import subprocess
 import sys
 import threading
+import time
 from functools import lru_cache
 
 from . import __version__
@@ -97,6 +98,11 @@ def validate_request(request):
         validate_duration(request.get('duration'))
         if type(request.get('rpm')) is not int or not 1 <= request['rpm'] <= 16383:
             raise invalid('RPM must be a positive supported integer.')
+        if 'lease_seconds' in request:
+            fields.add('lease_seconds')
+            value = request['lease_seconds']
+            if type(value) not in (int, float) or not 1 <= value <= 10:
+                raise invalid('A heartbeat lease must be finite and between 1 and 10 seconds.')
     elif operation not in ('auto', 'status'):
         raise invalid('Helper only accepts status, set and auto.')
     if set(request) != fields:
@@ -138,6 +144,8 @@ def relay(connection, request, stopping, command=None, env=None):
     try:
         if request['operation'] == 'set':
             config = {key: request[key] for key in ('fans', 'rpm', 'duration', 'experimental_ftst')}
+            if 'lease_seconds' in request:
+                config['lease_seconds'] = request['lease_seconds']
             config['demo'] = False
             process.stdin.write((json.dumps(config) + '\n').encode())
             process.stdin.flush()
@@ -149,11 +157,18 @@ def relay(connection, request, stopping, command=None, env=None):
             watched = [process.stdout] + ([connection] if connected else [])
             ready, _, _ = select.select(watched, [], [], .25)
             if connected and connection in ready:
-                # EOF or any byte after the request cancels; never another command.
+                # Leased rules accept liveness pulses, never new targets or keys.
                 try:
-                    connection.recv(1)
+                    pulse = connection.recv(1)
                 except OSError:
-                    pass
+                    pulse = b''
+                if request.get('lease_seconds') and pulse == b'.' and not process.stdin.closed:
+                    try:
+                        process.stdin.write(b'.')
+                        process.stdin.flush()
+                    except (BrokenPipeError, OSError):
+                        process.stdin.close()
+                    continue
                 if not process.stdin.closed:
                     process.stdin.close()
                 # Keep the write half open on graceful cancellation so the CLI
@@ -269,7 +284,7 @@ def serve():
     return 0
 
 
-def request(operation, *, output=emit, **parameters):
+def request(operation, *, output=emit, cancel_event=None, heartbeat=None, **parameters):
     payload = {'protocol': PROTOCOL, 'version': __version__, 'build': build_id(), 'operation': operation, **parameters}
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     interrupted = False
@@ -289,8 +304,20 @@ def request(operation, *, output=emit, **parameters):
         connection.settimeout(None)
         if can_signal: signal.signal(signal.SIGTERM, stop)
         raw = b''
+        next_heartbeat = 0
         while True:
             try:
+                if cancel_event is not None or heartbeat is not None:
+                    revoked = (cancel_event is not None and cancel_event.is_set()) or (heartbeat is not None and not heartbeat())
+                    if revoked and not interrupted:
+                        interrupted = True
+                        connection.shutdown(socket.SHUT_WR)
+                    if heartbeat is not None and not interrupted and time.monotonic() >= next_heartbeat:
+                        connection.sendall(b'.')
+                        next_heartbeat = time.monotonic() + 1
+                    ready, _, _ = select.select([connection], [], [], .25)
+                    if not ready:
+                        continue
                 chunk = connection.recv(65536)
             except KeyboardInterrupt:
                 if interrupted:
