@@ -37,12 +37,20 @@ class NativeTests(unittest.TestCase):
     def test_native_model_contracts(self):
         with tempfile.TemporaryDirectory() as temporary:
             binary = str(Path(temporary) / 'models')
-            subprocess.run(['swiftc', str(ROOT / 'native/Models.swift'), str(ROOT / 'native/Command.swift'), str(ROOT / 'native/ModelTests.swift'), '-o', binary], check=True, capture_output=True)
-            try:
-                result = subprocess.run([binary, '--backend', sys.executable], capture_output=True, timeout=30)
-            except subprocess.TimeoutExpired as error:
-                self.fail(f"Native model probe timed out. stdout={error.stdout!r}, stderr={error.stderr!r}")
-            self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+            subprocess.run(['swiftc', '-g', str(ROOT / 'native/Models.swift'), str(ROOT / 'native/Command.swift'), str(ROOT / 'native/ModelTests.swift'), '-o', binary], check=True, capture_output=True)
+            with subprocess.Popen([binary, '--backend', sys.executable], stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                try:
+                    stdout, stderr = process.communicate(timeout=30)
+                except subprocess.TimeoutExpired:
+                    try:
+                        sample = subprocess.run(['sample', str(process.pid), '1', '10'], capture_output=True, text=True, timeout=8)
+                        diagnostic = sample.stdout + sample.stderr
+                    except (OSError, subprocess.TimeoutExpired) as error:
+                        diagnostic = str(error)
+                    process.kill()
+                    stdout, stderr = process.communicate(timeout=5)
+                    self.fail(f"Native probe timed out. stdout={stdout!r}, stderr={stderr!r}\n{diagnostic}")
+                self.assertEqual(process.returncode, 0, stderr.decode(errors='replace'))
 
     @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Native memory tests require the macOS Swift toolchain')
     def test_native_stream_memory_stays_bounded_with_slow_consumer(self):
