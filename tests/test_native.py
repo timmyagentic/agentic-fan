@@ -1,5 +1,6 @@
 """Native presentation contracts and the platform-neutral launcher boundary."""
 import os
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -30,6 +31,21 @@ class NativeTests(unittest.TestCase):
             subprocess.run(['swiftc', str(ROOT / 'native/Models.swift'), str(ROOT / 'native/Command.swift'), str(ROOT / 'native/ModelTests.swift'), '-o', binary], check=True, capture_output=True)
             result = subprocess.run([binary, '--backend', sys.executable], capture_output=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+
+    @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Native memory tests require the macOS Swift toolchain')
+    def test_native_stream_memory_stays_bounded_with_slow_consumer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result = subprocess.run([
+                sys.executable, str(ROOT / 'scripts/test-native-memory.py'),
+                '--output-dir', temporary, '--frames', '1000', '--timeout', '60',
+            ], capture_output=True, text=True, timeout=90)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            report = json.loads(result.stdout)
+            self.assertTrue(report['passed'])
+            run = report['runs'][-1]
+            self.assertTrue(run['warmup']['producer_running'])
+            self.assertTrue(run['after_replay']['producer_running'])
+            self.assertEqual(run['last_sample_sequence'], 1100)
 
 
 class HelperUpgradeTests(unittest.TestCase):

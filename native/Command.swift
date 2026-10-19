@@ -1,6 +1,43 @@
 import Foundation
 import Darwin
 
+// A slow UI needs the newest monitoring sample, not an ever-growing history.
+// Seal each batch before a non-sample event so control/finish receipts stay FIFO.
+private final class CommandDelivery {
+    private final class Batch {
+        var message: [String: Any]?
+        init(_ message: [String: Any]) { self.message = message }
+    }
+    private let lock = NSLock()
+    private var pending: Batch?
+
+    func send(_ message: [String: Any], event: @escaping ([String: Any]) -> Void) {
+        lock.lock()
+        if message["event"] as? String == "sample", message["ok"] as? Bool == true {
+            if let pending {
+                pending.message = message
+                lock.unlock()
+                return
+            }
+            let batch = Batch(message)
+            pending = batch
+            lock.unlock()
+            DispatchQueue.main.async { [self] in
+                lock.lock()
+                let latest = batch.message
+                batch.message = nil
+                if pending === batch { pending = nil }
+                lock.unlock()
+                if let latest { event(latest) }
+            }
+        } else {
+            pending = nil
+            lock.unlock()
+            DispatchQueue.main.async { event(message) }
+        }
+    }
+}
+
 // One NDJSON stream feeds both native surfaces. The helper remains the only writer.
 final class Command {
     let process = Process()
@@ -9,6 +46,7 @@ final class Command {
     private let keepInputOpen: Bool
     private var inputPipe: Pipe?
     private let inputLock = NSLock()
+    private let delivery = CommandDelivery()
     init(_ arguments: [String], input: String? = nil, keepInputOpen: Bool = false) {
         self.input = input
         self.keepInputOpen = keepInputOpen
@@ -48,26 +86,58 @@ final class Command {
         DispatchQueue.global(qos: .utility).async { [self] in
             var buffer = Data()
             var chunk = [UInt8](repeating: 0, count: 65536)
+            let maximumFrameBytes = 1_048_576
+            var protocolErrorReported = false
+            var discardingOversizedFrame = false
+            func rejectFrame() {
+                if !protocolErrorReported {
+                    protocolErrorReported = true
+                    delivery.send(["ok": false, "error": ["message": "无法读取后台返回的数据。"]], event: event)
+                    if process.isRunning { process.terminate() }
+                }
+            }
             while true {
-                // Foundation may fill the requested buffer before returning. A single
-                // POSIX read delivers short control events immediately, before EOF.
-                let count = chunk.withUnsafeMutableBytes {
-                    Darwin.read(output.fileHandleForReading.fileDescriptor, $0.baseAddress, $0.count)
-                }
-                if count < 0 && errno == EINTR { continue }
-                if count <= 0 { break }
-                buffer.append(contentsOf: chunk.prefix(count))
-                while let newline = buffer.firstIndex(of: 10) {
-                    let line = Data(buffer[..<newline])
-                    buffer.removeSubrange(...newline)
-                    if let message = try? JSONSerialization.jsonObject(with: line) as? [String: Any] {
-                        DispatchQueue.main.async { event(message) }
-                    } else if !line.isEmpty {
-                        DispatchQueue.main.async { event(["ok": false, "error": ["message": "无法读取后台返回的数据。"]]) }
-                        process.terminate()
+                // This GCD work item lives for the whole monitoring session.
+                // Drain Foundation's autoreleased JSON objects after each read,
+                // rather than retaining hours of sensor dictionaries until EOF.
+                let keepReading = autoreleasepool { () -> Bool in
+                    // A POSIX read delivers short control events immediately.
+                    let count = chunk.withUnsafeMutableBytes {
+                        Darwin.read(output.fileHandleForReading.fileDescriptor, $0.baseAddress, $0.count)
                     }
+                    if count < 0 && errno == EINTR { return true }
+                    if count <= 0 { return false }
+                    var bytes = chunk.prefix(count)
+                    if discardingOversizedFrame {
+                        // A read can end in the middle of a rejected frame. Its
+                        // suffix must never be accepted as a separate receipt.
+                        guard let newline = bytes.firstIndex(of: 10) else { return true }
+                        bytes = bytes.suffix(from: newline + 1)
+                        discardingOversizedFrame = false
+                    }
+                    buffer.append(contentsOf: bytes)
+                    while let newline = buffer.firstIndex(of: 10) {
+                        // Check before decoding, including complete oversized lines.
+                        let size = buffer.distance(from: buffer.startIndex, to: newline)
+                        if size > maximumFrameBytes {
+                            buffer.removeSubrange(...newline)
+                            rejectFrame()
+                            continue
+                        }
+                        let line = Data(buffer[..<newline])
+                        buffer.removeSubrange(...newline)
+                        if let message = try? JSONSerialization.jsonObject(with: line) as? [String: Any] {
+                            delivery.send(message, event: event)
+                        } else if !line.isEmpty { rejectFrame() }
+                    }
+                    if buffer.count > maximumFrameBytes {
+                        buffer.removeAll(keepingCapacity: false)
+                        discardingOversizedFrame = true
+                        rejectFrame()
+                    }
+                    return true
                 }
-                if buffer.count > 1_048_576 { process.terminate(); break }
+                if !keepReading { break }
             }
             process.waitUntilExit()
             closeInput()

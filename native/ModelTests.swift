@@ -82,6 +82,40 @@ struct ModelTests {
             }, end: { code in
                 assert(code == 0 && finished, "Closing parent input must let runner finish orderly")
                 print("PASS: rule JSON stdin and parent-watch EOF lifecycle")
+                testFrameBoundaries()
+            })
+        } catch { fatalError(error.localizedDescription) }
+    }
+    static func testFrameBoundaries() {
+        let producer = #"""
+import json, signal, sys, time
+signal.signal(signal.SIGTERM, lambda *_: None)
+sys.stdout.write('x' * 1048577)
+sys.stdout.flush()
+time.sleep(0.1)
+print(json.dumps({'ok': True, 'event': 'control_finished', 'data': {'source': 'oversized-suffix'}}), flush=True)
+print(json.dumps({'ok': True, 'event': 'control_finished', 'data': {'source': 'genuine'}}), flush=True)
+print(json.dumps({'ok': False, 'event': 'sample', 'error': {'message': 'sample error must survive'}}), flush=True)
+for sequence in range(1000):
+    print(json.dumps({'ok': True, 'event': 'sample', 'data': {'sequence': sequence}}))
+sys.stdout.flush()
+"""#
+        let task = Command(["-u", "-c", producer])
+        var errors: [String] = []
+        var receipts: [String] = []
+        var lastSequence: Int?
+        do {
+            try task.run(event: { message in
+                if let error = message["error"] as? [String: Any], let text = error["message"] as? String { errors.append(text) }
+                let data = message["data"] as? [String: Any]
+                if message["event"] as? String == "control_finished", let source = data?["source"] as? String { receipts.append(source) }
+                if let sequence = data?["sequence"] as? Int { lastSequence = sequence }
+            }, end: { code in
+                assert(code == 0, "Protocol failure must still drain genuine restoration receipts")
+                assert(receipts == ["genuine"], "An oversized frame suffix must never become a receipt")
+                assert(errors.count == 2 && errors.last == "sample error must survive", "Protocol errors are bounded and sample errors cannot be coalesced")
+                assert(lastSequence == 999, "Latest sample must arrive before command completion")
+                print("PASS: bounded frames, preserved errors, genuine receipts and final sample ordering")
                 exit(0)
             })
         } catch { fatalError(error.localizedDescription) }
