@@ -25,7 +25,8 @@ def run(*args, **kwargs):
 
 def smoke(executable: Path, directory: Path, gui=True):
     """Exercise the bundled runtime outside the checkout, without system Python."""
-    env = dict(os.environ, MACFAN_DEMO_DIR=str(directory / "demo"), PATH="/usr/bin:/bin:/usr/sbin:/sbin")
+    env = dict(os.environ, MACFAN_DEMO_DIR=str(directory / "demo"),
+               MACFAN_RULES_PATH=str(directory / "demo/rules.json"), PATH="/usr/bin:/bin:/usr/sbin:/sbin")
     for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
         env.pop(key, None)
     for arguments in (
