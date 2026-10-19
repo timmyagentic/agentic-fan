@@ -62,7 +62,10 @@ struct ModelTests {
         })
         print("PASS: native temperature validity, bounded input, editable multi-rule JSON and verified restoration")
         fflush(stdout)
-        dispatchMain()
+        // Process exit notifications are delivered on the launching run loop.
+        // Match the Cocoa app: dispatchMain alone can leave waitUntilExit asleep
+        // after an already-exited child, depending on exit/delivery ordering.
+        RunLoop.main.run()
     }
     static func testInput() {
         let task = Command(["-c", "import sys,json; print(json.dumps({'ok':True,'data':json.load(sys.stdin)}),flush=True)"], input: #"{"enabled":false,"name":"Agent rule"}"#)
