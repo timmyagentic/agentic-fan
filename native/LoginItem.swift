@@ -1,0 +1,93 @@
+import Foundation
+import Combine
+import ServiceManagement
+
+enum LoginItemState {
+    case notRegistered, enabled, requiresApproval, notFound
+}
+
+protocol LoginItemService {
+    var state: LoginItemState { get }
+    func register() throws
+    func unregister() throws
+}
+
+private struct SystemLoginItem: LoginItemService {
+    var state: LoginItemState {
+        switch SMAppService.mainApp.status {
+        case .notRegistered: return .notRegistered
+        case .enabled: return .enabled
+        case .requiresApproval: return .requiresApproval
+        case .notFound: return .notFound
+        @unknown default: return .notFound
+        }
+    }
+    func register() throws { try SMAppService.mainApp.register() }
+    func unregister() throws { try SMAppService.mainApp.unregister() }
+}
+
+protocol LoginItemPreferences: AnyObject {
+    var defaultApplied: Bool { get set }
+}
+
+private final class SystemLoginItemPreferences: LoginItemPreferences {
+    var defaultApplied: Bool {
+        get { UserDefaults.standard.bool(forKey: "loginItemDefaultApplied") }
+        set { UserDefaults.standard.set(newValue, forKey: "loginItemDefaultApplied") }
+    }
+}
+
+final class LoginItemSettings: ObservableObject {
+    static let shared = LoginItemSettings(service: SystemLoginItem(), preferences: SystemLoginItemPreferences(),
+                                          demo: CommandLine.arguments.contains("--demo"))
+    @Published private(set) var state = LoginItemState.notRegistered
+    @Published private(set) var error: String?
+    private let service: LoginItemService
+    private let preferences: LoginItemPreferences
+    private let demo: Bool
+
+    init(service: LoginItemService, preferences: LoginItemPreferences, demo: Bool) {
+        self.service = service; self.preferences = preferences; self.demo = demo
+    }
+
+    var enabled: Bool { state == .enabled }
+    var statusText: String {
+        if demo { return "演示模式，不修改登录项。" }
+        switch state {
+        case .enabled: return "已开启：登录后只在菜单栏运行。"
+        case .notRegistered: return "已关闭登录时自动启动。"
+        case .requiresApproval: return "登录项已被系统关闭，请在系统设置中允许。"
+        case .notFound: return "macOS 未找到登录项，请从已安装的 MacFan.app 启动。"
+        }
+    }
+
+    func configureDefault() {
+        guard !demo else { return }
+        refresh()
+        guard !preferences.defaultApplied else { return }
+        // Apply the default once; later launches respect changes in System Settings.
+        preferences.defaultApplied = true
+        if state == .notRegistered { setEnabled(true) }
+    }
+
+    func refresh() {
+        guard !demo else { return }
+        state = service.state
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        guard !demo else { return }
+        preferences.defaultApplied = true
+        error = nil
+        do {
+            if enabled { try service.register() }
+            else { try service.unregister() }
+        } catch { self.error = "登录项更新失败：\(error.localizedDescription)" }
+        refresh()
+    }
+
+    func openSystemSettings() {
+        guard !demo else { return }
+        SMAppService.openSystemSettingsLoginItems()
+    }
+}

@@ -16,6 +16,7 @@ final class Monitor: ObservableObject {
     @Published var activeFanID: Int?
     @Published var selectedFan: Fan?
     @Published var showSettings = false
+    @Published var mainWindowRequest: UInt = 0
     @Published var showDetails = false
     @Published var search = ""
     let demo = CommandLine.arguments.contains("--demo")
@@ -366,10 +367,19 @@ struct DetailsView: View {
 
 struct ServiceSettings: View {
     @ObservedObject var model: Monitor
+    @ObservedObject private var login = LoginItemSettings.shared
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("MacFan 设置").font(.headline)
+            Toggle("登录时自动启动", isOn: Binding(get: { login.enabled }, set: { login.setEnabled($0) }))
+                .disabled(model.demo)
+            Text(login.statusText).font(.caption).foregroundStyle(.secondary)
+            if let error = login.error { Text(error).font(.caption).foregroundStyle(.orange) }
+            if login.state == .requiresApproval {
+                Button("打开登录项设置") { login.openSystemSettings() }
+            }
+            Divider()
             Label(model.helperStatus, systemImage: model.helperReady ? "checkmark.circle" : "exclamationmark.circle")
             Text("温度监测无需后台服务。首次调速或版本更新时，通过 macOS 系统认证安装受限 Helper。").font(.caption).foregroundStyle(.secondary)
             HStack {
@@ -379,7 +389,7 @@ struct ServiceSettings: View {
             Divider()
             Text("关闭窗口后继续在菜单栏运行。退出应用时如有本应用发起的调速，会先确认恢复自动模式。").font(.caption).foregroundStyle(.secondary)
             HStack { Spacer(); Button("完成") { dismiss() }.keyboardShortcut(.defaultAction) }
-        }.padding(22).frame(width: 390)
+        }.padding(22).frame(width: 390).onAppear { login.refresh() }
     }
 }
 
@@ -476,7 +486,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let popover = MenuPopover()
     private var subscription: AnyCancellable?
-    private var mainWindow: NSWindow?
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Keep the same menu-bar-only behavior for direct native launches too.
         NSApp.setActivationPolicy(.accessory)
@@ -497,12 +506,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         subscription = Monitor.shared.$snapshot.sink { [weak self] sample in
             self?.statusItem?.button?.title = " \(rpmText(sample?.fans.first?.actualRpm)) RPM · \(temperature(sample?.temperatureOverview.first { $0.group == "cpu" }?.value, precise: false))"
         }
-        DispatchQueue.main.async { [weak self] in
-            self?.mainWindow = NSApp.windows.first { $0.identifier?.rawValue == "main" }
-            self?.mainWindow?.isReleasedWhenClosed = false
-            self?.mainWindow?.titleVisibility = .hidden
-        }
+        LoginItemSettings.shared.configureDefault()
         Monitor.shared.start()
+        if CommandLine.arguments.contains("--startup-smoke") { verifyStartup() }
     }
     @objc func togglePopover(_ sender: Any?) {
         guard let button = statusItem?.button else { return }
@@ -511,8 +517,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func showMain() {
         popover.performClose(nil)
-        mainWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        Monitor.shared.mainWindowRequest &+= 1
+    }
+    func applicationDidBecomeActive(_ notification: Notification) { LoginItemSettings.shared.refresh() }
+    private func verifyStartup() {
+        func finish(_ ok: Bool) {
+            Monitor.shared.shutdown()
+            print(ok ? "MACFAN_STARTUP_SMOKE_OK" : "MACFAN_STARTUP_SMOKE_FAILED")
+            fflush(stdout)
+            exit(ok ? 0 : 1)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self, NSApp.activationPolicy() == .accessory,
+                  !NSApp.windows.contains(where: { $0.isVisible && $0.identifier?.rawValue == "main" })
+            else { finish(false); return }
+            self.showMain()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                guard let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }), window.isVisible
+                else { finish(false); return }
+                window.performClose(nil)
+                guard !window.isVisible else { finish(false); return }
+                self.showMain()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    finish(NSApp.windows.contains { $0.identifier?.rawValue == "main" && $0.isVisible }
+                           && NSApp.activationPolicy() == .accessory)
+                }
+            }
+        }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -544,18 +575,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct MacFanApplication: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = Monitor.shared
+    @Environment(\.openWindow) private var openWindow
     init() {
-        if CommandLine.arguments.contains("--smoke") && !CommandLine.arguments.contains("--demo") {
+        if (CommandLine.arguments.contains("--smoke") || CommandLine.arguments.contains("--startup-smoke"))
+            && !CommandLine.arguments.contains("--demo") {
             fputs("Native smoke testing requires --demo.\n", stderr)
             exit(2)
         }
     }
     var body: some Scene {
         Window("MacFan", id: "main") { MainView(model: model) }
+            .defaultLaunchBehavior(.suppressed)
+            .restorationBehavior(.disabled)
+            .onChange(of: model.mainWindowRequest) {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+            }
             .windowResizability(.contentSize)
             .windowToolbarStyle(.unifiedCompact)
             .windowStyle(.hiddenTitleBar)
-            .commands { CommandGroup(replacing: .appSettings) { Button("设置…") { model.showSettings = true }.keyboardShortcut(",") } }
+            .commands { CommandGroup(replacing: .appSettings) {
+                Button("设置…") { AppDelegate.instance?.showMain(); model.showSettings = true }.keyboardShortcut(",")
+            } }
             .commands {
                 CommandGroup(after: .windowArrangement) {
                     Button("显示主窗口") { AppDelegate.instance?.showMain() }.keyboardShortcut("0")
