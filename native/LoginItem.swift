@@ -2,8 +2,11 @@ import Foundation
 import Combine
 import ServiceManagement
 
-enum LoginItemState {
-    case notRegistered, enabled, requiresApproval, notFound
+enum LoginItemState: String {
+    case notRegistered = "not_registered"
+    case enabled
+    case requiresApproval = "requires_approval"
+    case notFound = "not_found"
 }
 
 protocol LoginItemService {
@@ -82,8 +85,25 @@ final class LoginItemSettings: ObservableObject {
         do {
             if enabled { try service.register() }
             else { try service.unregister() }
-        } catch { self.error = "登录项更新失败：\(error.localizedDescription)" }
+        } catch {
+            let detail = error as NSError
+            self.error = "登录项更新失败：\(detail.localizedDescription)（\(detail.domain) \(detail.code)）"
+        }
         refresh()
+    }
+
+    func command(_ operation: String) -> Bool {
+        switch operation {
+        case "status": refresh()
+        case "enable": setEnabled(true)
+        case "disable": setEnabled(false)
+        default: return false
+        }
+        let report: [String: Any] = ["state": state.rawValue, "enabled": enabled,
+                                     "simulated": demo, "error": error as Any? ?? NSNull()]
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
+           let text = String(data: data, encoding: .utf8) { print(text) }
+        return true
     }
 
     func openSystemSettings() {

@@ -55,6 +55,12 @@ def smoke(executable: Path, directory: Path, gui=True):
             not any(row["raw_value"] == -9200 and row["value"] is None for row in report["sensor_issues"])):
         raise RuntimeError("Packaged app failed temperature-quality regression")
     if gui:
+        for operation in ("status", "enable", "disable"):
+            login = run(executable.parent / "MacFanUI", "--demo", "--login-item", operation,
+                        cwd=directory, env=env, capture_output=True, text=True, timeout=30)
+            report = json.loads(login.stdout)
+            if not report["simulated"] or report["enabled"] or report["error"]:
+                raise RuntimeError("Demo login item command was not isolated")
         run(executable, "--gui", "--demo", "--gui-smoke-test", cwd=directory, env=env, timeout=30)
         # Also exercise the exact native entry selected by LaunchServices/Finder.
         run(executable.parent / "MacFanUI", "--demo", "--smoke", cwd=directory, env=env, timeout=30)

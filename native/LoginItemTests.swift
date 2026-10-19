@@ -58,6 +58,8 @@ struct LoginItemTests {
         demo.configureDefault(); demo.setEnabled(true); demo.setEnabled(false); demo.refresh()
         assert(isolated.reads == 0 && isolated.registrations == 0 && isolated.removals == 0)
         assert(!untouched.defaultApplied, "Demo must not suppress the real first-launch default")
+        assert(demo.command("status") && demo.command("enable") && demo.command("disable"))
+        assert(!demo.command("invalid") && isolated.reads == 0 && !untouched.defaultApplied)
         print("PASS: login default, explicit opt-out, system opt-out, failure and demo isolation")
     }
 }
