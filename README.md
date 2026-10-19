@@ -1,8 +1,14 @@
 # MacFan — Mac 温度与风扇应用，内置 Agent CLI
 
-MVP 提供两个核心能力：读取温度传感器；在有限时长内设置风扇转速并恢复自动控制。面向 Apple Silicon，交付格式为 **DMG 内的 `MacFan.app`**，内含窗口、CLI 和所需运行时。用户不需要安装 Python，也不需要模型、API Key 或网络服务。
+提供温度监测、有限时长调速与可由 Agent 编辑的温度规则。面向 Apple Silicon，交付格式为 **DMG 内的 `MacFan.app`**，内含窗口、CLI 和所需运行时。用户不需要安装 Python，也不需要模型、API Key 或网络服务。
 
-**0.4.1：修复其他应用全屏时菜单栏弹窗不可见的问题。** 原生 SwiftUI 主窗口与菜单栏弹窗保留紧凑布局。 紧凑双栏、搜索与测点详情、有限时调速弹窗、实际/目标转速和倒计时共用同一条后台数据流。关闭主窗口后在菜单栏继续运行；退出前如有本应用发起的调速，须确认恢复自动模式。 本机 M4 的 65 个测点可识别为 CPU、GPU、内存、SSD、无线网络与电源管理，其余测点保留为未知。命名依据与范围见 [传感器名称说明](docs/sensor-labels.md)。首次授权安装 Helper 后，Agent 无需 sudo 或重复弹窗即可控扇。 修复 SMC 异步读回导致的调速/恢复误报。已在 Mac16,10、macOS 27.0 上验证 1600 RPM 短时调速、到期恢复、主动恢复与 CLI 被终止后的恢复；其他机型、睡眠及 Ftst 路径仍未验收。详见 [硬件验收记录](docs/hardware-validation.md) 和 [温度有效性说明](docs/temperature-validation.md)。
+**0.5.1：修复原生界面持续监测时的内存增长。** 每轮读取后释放 JSON 临时对象；界面忙时合并待显示的采样，保留控制、错误与恢复回执的顺序。新增保持后台进程存活的 255 测点回放与物理内存回归测试，避免退出进程掩盖泄漏。详见[原生界面内存检查](docs/native-memory.md)。
+
+**0.5.0：增加 Agent 可直接编辑的本地温度规则。** 预置 CPU ≥99°C 满速、≤95°C 持续 5 秒恢复自动，默认关闭；同一份 JSON 支持多条规则、最高/固定 RPM、热加载与版本冲突检查，CLI 分别反馈保存、载入、触发和转速确认。详见[温度规则与 Agent 配置](docs/temperature-rules.md)。
+
+**菜单栏与登录启动。** 应用只在菜单栏驻留，不显示 Dock 图标；首次正常打开默认注册当前用户的登录项，可在设置关闭。启动时不弹出主窗口，通过菜单栏“打开主窗口”访问完整界面。已启用的温度规则会随应用恢复运行；只运行安装器或 CLI 不会注册登录项。
+
+**原生界面与监测。** 已包含全屏菜单栏弹窗修复。 原生 SwiftUI 主窗口与菜单栏弹窗保留紧凑布局。 紧凑双栏、搜索与测点详情、有限时调速弹窗、实际/目标转速和倒计时共用同一条后台数据流。关闭主窗口后在菜单栏继续运行；退出前如有本应用发起的调速，须确认恢复自动模式。 本机 M4 的 65 个测点可识别为 CPU、GPU、内存、SSD、无线网络与电源管理，其余测点保留为未知。命名依据与范围见 [传感器名称说明](docs/sensor-labels.md)。首次授权安装 Helper 后，Agent 无需 sudo 或重复弹窗即可控扇。 修复 SMC 异步读回导致的调速/恢复误报。已在 Mac16,10、macOS 27.0 上验证 1600 RPM 短时调速、到期恢复、主动恢复与 CLI 被终止后的恢复；其他机型、睡眠及 Ftst 路径仍未验收。详见 [硬件验收记录](docs/hardware-validation.md) 和 [温度有效性说明](docs/temperature-validation.md)。
 
 ## 给 Agent 一句话安装
 
@@ -20,8 +26,8 @@ bash scripts/install-macos.sh --agent codex
 
 DMG 构建目标为 **Apple Silicon、macOS 15+**。取得构建产物后：
 
-1. 打开 `MacFan-0.4.1-arm64-dev.dmg`，把 `MacFan.app` 拖入 `Applications`。
-2. 双击应用，查看温度测点、风扇转速和模式。
+1. 打开 `MacFan-<version>-arm64-dev.dmg`，把 `MacFan.app` 拖入 `Applications`。
+2. 双击应用后，点击菜单栏 MacFan 图标查看概览；选择“打开主窗口”查看温度测点、风扇转速和模式。
 3. 选择风扇、目标 RPM 与持续秒数，点击设置；首次控扇时由 macOS 请求管理员授权安装 Helper，后续无需重复授权。也可以点击“全部恢复自动”。
 
 默认 CI 产物是 ad-hoc 签名的开发包，**未经 Apple 公证**，下载后可能被 Gatekeeper 拦截。正式分发需要 Developer ID 签名与公证；构建方法见 [macOS 打包说明](docs/macos-packaging.md)。仓库中的 Python 包仅用于开发，不是面向用户的安装包。

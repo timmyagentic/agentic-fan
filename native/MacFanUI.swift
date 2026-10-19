@@ -16,7 +16,18 @@ final class Monitor: ObservableObject {
     @Published var activeFanID: Int?
     @Published var selectedFan: Fan?
     @Published var showSettings = false
+    @Published var mainWindowRequest: UInt = 0
     @Published var showDetails = false
+    @Published var showRules = false
+    @Published var rulesDraft = ""
+    @Published var rulesPath = ""
+    @Published var rulesEditorError: String?
+    @Published var rulesNotice: String?
+    @Published var rulesDraftRevision: String?
+    @Published var rulesLoading = false
+    @Published var rulesSaving = false
+    @Published var rulesStopping = false
+    @Published var rulesRecoveryRequired = false
     @Published var search = ""
     let demo = CommandLine.arguments.contains("--demo")
     let smoke = CommandLine.arguments.contains("--smoke")
@@ -24,12 +35,37 @@ final class Monitor: ObservableObject {
     private var watch: Command?
     private var control: Command?
     private var utility: Command?
+    private var rulesCommand: Command?
+    private var runnerFinished: Bool?
+    private var runnerError: String?
+    private var lastRulesError: String?
+    private var stopRulesCompletion: ((Bool) -> Void)?
     private var smokeStarted = false
     private var quitting = false
+    private lazy var rulesConfigPath: String? = {
+        if let configured = ProcessInfo.processInfo.environment["MACFAN_RULES_PATH"], !configured.isEmpty { return configured }
+        return demo ? FileManager.default.temporaryDirectory.appendingPathComponent("macfan-demo-\(UUID().uuidString)/rules.json").path : nil
+    }()
     var online: Bool { snapshot != nil }
     var components: [Component] { snapshot?.temperatureOverview ?? [] }
     var fans: [Fan] { snapshot?.fans ?? [] }
     var prefix: [String] { demo ? ["--demo"] : [] }
+    var rulesEnabled: Bool { snapshot?.rules?.enabled == true }
+    var rulesStatus: String { snapshot?.rules?.statusText ?? "正在读取规则…" }
+    var rulesSummary: String {
+        let enabled = snapshot?.rules?.config?.rules.filter(\.enabled) ?? []
+        guard let first = enabled.first else { return "可在 JSON 中添加温度条件与转速" }
+        return first.summary + (enabled.count > 1 ? "，另有 \(enabled.count - 1) 条" : "")
+    }
+    var draftEnabled: Bool { ruleDocumentEnabled(rulesDraft) == true }
+    var rulesChangedExternally: Bool {
+        guard let draft = rulesDraftRevision, let live = snapshot?.rules?.loadedRevision else { return false }
+        return draft != live
+    }
+    var hasRunner: Bool { watch != nil }
+    private func ruleArguments(_ action: String, _ rest: [String] = []) -> [String] {
+        prefix + ["rules", action] + (rulesConfigPath.map { ["--config", $0] } ?? []) + rest
+    }
     var machine: String {
         if demo { return "演示设备 · 模拟数据" }
         var size = 0
@@ -41,11 +77,24 @@ final class Monitor: ObservableObject {
     func start() {
         guard watch == nil else { return }
         error = nil
-        let task = Command(prefix + ["watch", "--interval", "1"])
+        runnerFinished = nil; runnerError = nil
+        let task = Command(ruleArguments("run", ["--parent-watch"]), keepInputOpen: true)
         watch = task
         do {
             try task.run(event: { [weak self] message in
                 guard let self, self.watch === task else { return }
+                if let failure = message["error"] as? [String: Any] {
+                    runnerError = failure["message"] as? String ?? "规则运行失败。"
+                    error = runnerError
+                    if (failure["code"] as? String ?? "").hasPrefix("RESTORE_") { rulesRecoveryRequired = true }
+                }
+                if message["event"] as? String == "rules_finished" {
+                    let data = message["data"] as? [String: Any] ?? [:]
+                    runnerFinished = data["automatic_mode_verified"] as? Bool == true
+                    if runnerFinished == true { rulesRecoveryRequired = false }
+                    return
+                }
+                guard message["event"] as? String == "sample" else { return }
                 guard message["ok"] as? Bool == true, let data = message["data"],
                       let bytes = try? JSONSerialization.data(withJSONObject: data),
                       let sample = try? decoder.decode(Snapshot.self, from: bytes) else {
@@ -55,15 +104,29 @@ final class Monitor: ObservableObject {
                     return
                 }
                 snapshot = sample
+                if let rules = sample.rules {
+                    rulesPath = rules.configPath
+                    if rules.automaticModeVerified == true { rulesRecoveryRequired = false }
+                    else if rules.mayOwnControl { rulesRecoveryRequired = true }
+                    if let detail = rules.error { error = detail; lastRulesError = detail }
+                    else if error == lastRulesError { error = nil; lastRulesError = nil }
+                }
                 status = demo ? "演示模式" : "已连接"
                 if smoke && !smokeStarted, let fan = sample.fans.first {
                     smokeStarted = true
                     set(fan, rpm: 3000, duration: 1)
                 }
             }, end: { [weak self] code in
-                guard let self, !quitting, self.watch === task else { return }
+                guard let self, self.watch === task else { return }
                 watch = nil; snapshot = nil; status = "连接中断"
-                error = error ?? "监测已停止（\(code)）。请重试连接。"
+                let restored = code == 0 && runnerFinished == true
+                if let completion = stopRulesCompletion {
+                    stopRulesCompletion = nil; rulesStopping = false
+                    if !restored { rulesRecoveryRequired = true; error = runnerError ?? "规则运行器未确认恢复自动模式，应用保持运行。" }
+                    completion(restored)
+                } else if !quitting {
+                    error = runnerError ?? "监测已停止（\(code)）。请重试连接。"
+                }
             })
         } catch { watch = nil; self.error = error.localizedDescription; status = "连接失败" }
         refreshHelper()
@@ -105,8 +168,80 @@ final class Monitor: ObservableObject {
             })
         } catch { busy = false; self.error = error.localizedDescription }
     }
+    func reloadRules() {
+        guard !rulesLoading, !rulesSaving else { return }
+        rulesLoading = true; rulesEditorError = nil; rulesNotice = nil
+        let task = Command(ruleArguments("show"))
+        rulesCommand = task
+        var loaded = false
+        do {
+            try task.run(event: { [weak self] message in
+                guard let self else { return }
+                if let failure = message["error"] as? [String: Any] {
+                    rulesEditorError = failure["message"] as? String
+                    return
+                }
+                guard message["ok"] as? Bool == true,
+                      let data = message["data"] as? [String: Any], let config = data["config"],
+                      let document = try? ruleDocument(config) else { return }
+                loaded = true
+                rulesDraft = document
+                rulesDraftRevision = data["revision"] as? String
+                rulesPath = data["path"] as? String ?? rulesPath
+            }, end: { [weak self] code in
+                guard let self else { return }
+                rulesLoading = false; rulesCommand = nil
+                if code != 0 || !loaded { rulesEditorError = rulesEditorError ?? "无法读取规则文件。" }
+            })
+        } catch { rulesLoading = false; rulesEditorError = error.localizedDescription }
+    }
+    func setDraftEnabled(_ enabled: Bool) {
+        do { rulesDraft = try ruleDocument(rulesDraft, enabled: enabled); rulesEditorError = nil; rulesNotice = nil }
+        catch { rulesEditorError = error.localizedDescription }
+    }
+    func saveRules() {
+        guard !busy, !restoring, !rulesSaving, !rulesLoading, !rulesStopping, !rulesChangedExternally, online else { return }
+        guard !receipt.recoveryRequired, control == nil else {
+            rulesEditorError = "请先结束定时调速并确认恢复系统自动。"; return
+        }
+        guard let enabled = ruleDocumentEnabled(rulesDraft) else {
+            rulesEditorError = "规则必须是有效的 JSON 对象，enabled 必须为 true 或 false。"; return
+        }
+        error = nil; rulesEditorError = nil; rulesNotice = nil
+        let document = rulesDraft
+        if enabled && !helperReady && !demo {
+            installHelper { [weak self] in self?.applyRules(document) }
+        } else { applyRules(document) }
+    }
+    private func applyRules(_ document: String) {
+        rulesSaving = true
+        let revisionArguments = rulesDraftRevision.map { ["--if-revision", $0] } ?? []
+        let task = Command(ruleArguments("apply", ["--stdin", "--wait", "8"] + revisionArguments), input: document)
+        rulesCommand = task
+        var saved = false
+        do {
+            try task.run(event: { [weak self] message in
+                guard let self else { return }
+                if let failure = message["error"] as? [String: Any] {
+                    rulesEditorError = failure["message"] as? String ?? "规则未能保存。"
+                    return
+                }
+                guard message["ok"] as? Bool == true, let data = message["data"] as? [String: Any],
+                      data["saved"] as? Bool == true else { return }
+                saved = true
+                rulesPath = data["path"] as? String ?? rulesPath
+                rulesDraftRevision = data["revision"] as? String
+                if let config = data["config"], let normalized = try? ruleDocument(config) { rulesDraft = normalized }
+                rulesNotice = data["loaded"] as? Bool == true ? "已保存，运行器已载入。" : "已保存；运行器尚未确认载入，请检查运行状态。"
+            }, end: { [weak self] code in
+                guard let self else { return }
+                rulesSaving = false; rulesCommand = nil
+                if code != 0 || !saved { rulesEditorError = rulesEditorError ?? "规则未能保存（\(code)）。" }
+            })
+        } catch { rulesSaving = false; rulesEditorError = error.localizedDescription }
+    }
     func set(_ fan: Fan, rpm: Int, duration: Int) {
-        guard !busy, !receipt.recoveryRequired, online else { return }
+        guard !busy, !rulesSaving, !rulesEnabled, !rulesRecoveryRequired, !receipt.recoveryRequired, online else { return }
         guard helperReady || demo else {
             installHelper { [weak self] in self?.set(fan, rpm: rpm, duration: duration) }; return
         }
@@ -136,13 +271,37 @@ final class Monitor: ObservableObject {
                 guard let self else { return }
                 restoring = false
                 error = response.completionError(exitCode: code)
-                if error == nil && (fanID == nil || fanID == activeFanID) { receipt.restored = true; receipt.recoveryRequired = false; activeFanID = nil }
+                if error == nil && (fanID == nil || fanID == activeFanID) {
+                    receipt.restored = true; receipt.recoveryRequired = false; activeFanID = nil
+                    if watch == nil { rulesRecoveryRequired = false }
+                }
                 completion?(error == nil)
             })
         } catch { restoring = false; self.error = error.localizedDescription; completion?(false) }
     }
-    func retry() { watch?.stop(); watch = nil; start() }
-    func shutdown() { quitting = true; watch?.stop(); control?.stop(); utility?.stop() }
+    func retry() {
+        guard !rulesStopping, !rulesSaving else { return }
+        if watch != nil {
+            stopRules { [weak self] ok in if ok { self?.start() } }
+        } else { start() }
+    }
+    private func stopRules(completion: @escaping (Bool) -> Void) {
+        guard let watch else {
+            completion(!rulesRecoveryRequired); return
+        }
+        guard !rulesStopping else { completion(false); return }
+        rulesStopping = true; stopRulesCompletion = completion
+        watch.closeInput()
+    }
+    func prepareToQuit(completion: @escaping (Bool) -> Void) {
+        if receipt.recoveryRequired || control != nil {
+            restore(fanID: activeFanID) { [weak self] ok in
+                guard let self, ok else { completion(false); return }
+                stopRules(completion: completion)
+            }
+        } else { stopRules(completion: completion) }
+    }
+    func shutdown() { quitting = true; watch?.stop(); control?.stop(); utility?.stop(); rulesCommand?.stop() }
     private func finishSmoke(_ ok: Bool) {
         shutdown()
         print(ok ? "MACFAN_NATIVE_SMOKE_OK" : "MACFAN_NATIVE_SMOKE_FAILED")
@@ -202,7 +361,7 @@ struct FanPanel: View {
                             })) {
                             Text("自动").tag("auto")
                             Text("自定义…").tag("manual")
-                        }.pickerStyle(.segmented).labelsHidden().disabled(model.restoring || !fan.canControl)
+                        }.pickerStyle(.segmented).labelsHidden().disabled(model.restoring || model.rulesEnabled || model.rulesSaving || model.rulesRecoveryRequired || !fan.canControl)
                         if model.busy && model.activeFanID == fan.id && model.receipt.started && !model.receipt.restored {
                             TimelineView(.periodic(from: .now, by: 1)) { context in
                                 let remaining = max(0, Int((model.receipt.deadline ?? context.date).timeIntervalSince(context.date)))
@@ -213,11 +372,29 @@ struct FanPanel: View {
                             }
                         } else {
                             Text(mode(fan)).font(.caption).foregroundStyle(.secondary)
-                            Text("定时调速结束后恢复自动").font(.caption).foregroundStyle(.secondary)
+                            Text(model.rulesEnabled ? "温度规则启用时由规则控制" : "定时调速结束后恢复自动").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }.padding(compact ? 0 : 14).frame(maxWidth: .infinity, alignment: .leading)
                     .background(compact ? Color.clear : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Image(systemName: "thermometer.medium").foregroundStyle(.secondary)
+                    Text(model.rulesStatus).font(.caption.weight(.medium))
+                    Spacer(minLength: 0)
+                    Button("编辑…") {
+                        if compact { AppDelegate.instance?.showMain() }
+                        model.showRules = true
+                    }.font(.caption).buttonStyle(.plain).foregroundStyle(.blue).accessibilityLabel("编辑温度规则")
+                }
+                Text(model.rulesSummary).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if let rules = model.snapshot?.rules, let rpm = rules.desiredRpm {
+                    Text("目标 \(rpm) RPM · \(rules.controlConfirmed ? "已确认转速" : "正在达到目标")").font(.caption).monospacedDigit()
+                }
+                if model.rulesRecoveryRequired && !model.hasRunner {
+                    Button("恢复系统自动") { model.restore() }.disabled(model.restoring)
+                }
             }
         }
     }
@@ -327,9 +504,64 @@ struct SpeedSheet: View {
                 Spacer()
                 Button("开始定时调速") { model.set(fan, rpm: Int(rpm), duration: seconds); dismiss() }
                     .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
-                    .disabled(model.busy || !model.online || !rpm.isFinite || rpm < (fan.minRpm ?? 1000) || rpm > (fan.maxRpm ?? 4900))
+                    .disabled(model.busy || model.rulesEnabled || model.rulesSaving || model.rulesRecoveryRequired || !model.online || !rpm.isFinite || rpm < (fan.minRpm ?? 1000) || rpm > (fan.maxRpm ?? 4900))
             }
         }.padding(22).frame(width: 350)
+    }
+}
+
+struct RulesSheet: View {
+    @ObservedObject var model: Monitor
+    @Environment(\.dismiss) private var dismiss
+    private var editingLocked: Bool { model.rulesLoading || model.rulesSaving || model.busy || model.rulesStopping }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("温度规则").font(.headline)
+                Spacer()
+                Text(model.rulesStatus).font(.caption).foregroundStyle(.secondary)
+            }
+            Text(model.rulesSummary).font(.callout).fixedSize(horizontal: false, vertical: true)
+            Toggle("启用温度规则", isOn: Binding(get: { model.draftEnabled }, set: { model.setDraftEnabled($0) }))
+                .disabled(editingLocked || ruleDocumentEnabled(model.rulesDraft) == nil)
+            Text("修改后点击“保存并应用”。规则启用时暂停手动调速；所有触发条件解除后恢复系统自动。").font(.caption).foregroundStyle(.secondary)
+            TextEditor(text: $model.rulesDraft)
+                .font(.system(size: 12, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .padding(8).frame(height: 270)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.25)))
+                .disabled(editingLocked).accessibilityLabel("温度规则 JSON")
+            HStack(alignment: .top, spacing: 8) {
+                Text("配置文件").font(.caption).foregroundStyle(.secondary)
+                Text(model.rulesPath.isEmpty ? "正在读取…" : model.rulesPath)
+                    .font(.system(size: 11, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("复制路径") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(model.rulesPath, forType: .string)
+                }.font(.caption).disabled(model.rulesPath.isEmpty)
+            }
+            Text(model.demo ? "演示模式使用独立配置，不会调整真实风扇。" : "Agent 可直接编辑此 JSON 文件，运行器会自动重新载入。退出 MacFan 前会确认已释放本应用的调速。")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if model.rulesChangedExternally {
+                Label("配置已从外部更新，请重新读取后再保存。", systemImage: "arrow.clockwise").font(.caption).foregroundStyle(.orange)
+            }
+            if let issue = model.rulesEditorError ?? model.error {
+                Text(issue).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            } else if let notice = model.rulesNotice {
+                Text(notice).font(.caption).foregroundStyle(.secondary)
+            }
+            HStack {
+                Button("重新读取") { model.reloadRules() }.disabled(editingLocked)
+                if model.rulesLoading || model.rulesSaving { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("完成") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.rulesSaving)
+                Button(model.rulesSaving ? "正在保存…" : "保存并应用") { model.saveRules() }
+                    .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                    .disabled(editingLocked || model.restoring || model.rulesChangedExternally || !model.online)
+            }
+        }.padding(22).frame(width: 620).onAppear { model.reloadRules() }
     }
 }
 
@@ -366,10 +598,19 @@ struct DetailsView: View {
 
 struct ServiceSettings: View {
     @ObservedObject var model: Monitor
+    @ObservedObject private var login = LoginItemSettings.shared
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("MacFan 设置").font(.headline)
+            Toggle("登录时自动启动", isOn: Binding(get: { login.enabled }, set: { login.setEnabled($0) }))
+                .disabled(model.demo)
+            Text(login.statusText).font(.caption).foregroundStyle(.secondary)
+            if let error = login.error { Text(error).font(.caption).foregroundStyle(.orange) }
+            if login.state == .requiresApproval {
+                Button("打开登录项设置") { login.openSystemSettings() }
+            }
+            Divider()
             Label(model.helperStatus, systemImage: model.helperReady ? "checkmark.circle" : "exclamationmark.circle")
             Text("温度监测无需后台服务。首次调速或版本更新时，通过 macOS 系统认证安装受限 Helper。").font(.caption).foregroundStyle(.secondary)
             HStack {
@@ -379,7 +620,7 @@ struct ServiceSettings: View {
             Divider()
             Text("关闭窗口后继续在菜单栏运行。退出应用时如有本应用发起的调速，会先确认恢复自动模式。").font(.caption).foregroundStyle(.secondary)
             HStack { Spacer(); Button("完成") { dismiss() }.keyboardShortcut(.defaultAction) }
-        }.padding(22).frame(width: 390)
+        }.padding(22).frame(width: 390).onAppear { login.refresh() }
     }
 }
 
@@ -389,6 +630,7 @@ struct SurfaceSheets: ViewModifier {
         content.sheet(item: $model.selectedFan) { SpeedSheet(model: model, fan: $0) }
             .sheet(isPresented: $model.showDetails) { DetailsView(model: model) }
             .sheet(isPresented: $model.showSettings) { ServiceSettings(model: model) }
+            .sheet(isPresented: $model.showRules) { RulesSheet(model: model) }
     }
 }
 
@@ -412,11 +654,12 @@ struct MainView: View {
                 Circle().fill(model.online ? (model.demo ? Color.orange : Color.green) : Color.gray).frame(width: 6, height: 6)
                 Text(model.status).font(.caption)
                 Spacer()
-                if model.restoring { ProgressView().controlSize(.mini); Text("正在恢复自动…").font(.caption) }
+                if model.restoring || model.rulesStopping { ProgressView().controlSize(.mini); Text("正在恢复自动…").font(.caption) }
+                else if model.rulesSaving { ProgressView().controlSize(.mini); Text("正在应用规则…").font(.caption) }
                 else if model.busy && !model.receipt.started { ProgressView().controlSize(.mini); Text(model.helperReady ? "正在准备调速…" : "等待系统认证…").font(.caption) }
                 Button("传感器详情", systemImage: "info.circle") { model.showDetails = true }.buttonStyle(.plain).foregroundStyle(.blue)
             }.padding(.horizontal, 16).frame(height: 30)
-        }.frame(width: 780, height: 340).background(Color(nsColor: .windowBackgroundColor))
+        }.frame(width: 780, height: 375).background(Color(nsColor: .windowBackgroundColor))
             .toolbar {
                 ToolbarItem(placement: .principal) { HStack { Text("MacFan").fontWeight(.semibold); Text(model.machine).foregroundStyle(.secondary) }.font(.system(size: 12)) }
                 ToolbarItem { Button("设置", systemImage: "gearshape") { model.showSettings = true } }
@@ -451,12 +694,15 @@ struct MenuPanel: View {
                     Text(temperature(component.value, precise: false)).monospacedDigit()
                 }.font(.system(size: 12)).frame(height: 18)
             }
-            if model.receipt.recoveryRequired && !model.receipt.restored {
+            if (model.receipt.recoveryRequired && !model.receipt.restored) || (model.rulesRecoveryRequired && !model.hasRunner) {
                 Button { model.restore(fanID: model.activeFanID) } label: { Text(model.restoring ? "正在恢复…" : "恢复系统自动").frame(maxWidth: .infinity) }
                     .buttonStyle(.borderedProminent).disabled(model.restoring)
+            } else if model.rulesEnabled {
+                Button { showMain(); model.showRules = true } label: { Text("编辑温度规则…").frame(maxWidth: .infinity) }
+                    .buttonStyle(.borderedProminent).disabled(model.rulesSaving || model.rulesStopping)
             } else {
                 Button { showMain(); model.selectedFan = model.fans.first } label: { Text(model.busy ? "正在准备…" : "调整转速…").frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent).disabled(model.busy || model.fans.first?.canControl != true || !model.online)
+                    .buttonStyle(.borderedProminent).disabled(model.busy || model.rulesSaving || model.rulesRecoveryRequired || model.fans.first?.canControl != true || !model.online)
             }
             if let error = model.error { Text(error).font(.caption).foregroundStyle(.orange).lineLimit(2) }
             Divider()
@@ -476,7 +722,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let popover = MenuPopover()
     private var subscription: AnyCancellable?
-    private var mainWindow: NSWindow?
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Keep the same menu-bar-only behavior for direct native launches too.
+        NSApp.setActivationPolicy(.accessory)
+    }
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.instance = self
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -493,12 +742,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         subscription = Monitor.shared.$snapshot.sink { [weak self] sample in
             self?.statusItem?.button?.title = " \(rpmText(sample?.fans.first?.actualRpm)) RPM · \(temperature(sample?.temperatureOverview.first { $0.group == "cpu" }?.value, precise: false))"
         }
-        DispatchQueue.main.async { [weak self] in
-            self?.mainWindow = NSApp.windows.first { $0.identifier?.rawValue == "main" }
-            self?.mainWindow?.isReleasedWhenClosed = false
-            self?.mainWindow?.titleVisibility = .hidden
-        }
+        LoginItemSettings.shared.configureDefault()
         Monitor.shared.start()
+        if CommandLine.arguments.contains("--startup-smoke") { verifyStartup() }
     }
     @objc func togglePopover(_ sender: Any?) {
         guard let button = statusItem?.button else { return }
@@ -507,14 +753,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func showMain() {
         popover.performClose(nil)
-        mainWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        Monitor.shared.mainWindowRequest &+= 1
+    }
+    func applicationDidBecomeActive(_ notification: Notification) { LoginItemSettings.shared.refresh() }
+    private func verifyStartup() {
+        func finish(_ ok: Bool) {
+            Monitor.shared.shutdown()
+            print(ok ? "MACFAN_STARTUP_SMOKE_OK" : "MACFAN_STARTUP_SMOKE_FAILED")
+            fflush(stdout)
+            exit(ok ? 0 : 1)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self, NSApp.activationPolicy() == .accessory,
+                  !NSApp.windows.contains(where: { $0.isVisible && $0.identifier?.rawValue == "main" })
+            else { finish(false); return }
+            self.showMain()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                guard let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }), window.isVisible
+                else { finish(false); return }
+                window.performClose(nil)
+                guard !window.isVisible else { finish(false); return }
+                self.showMain()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    finish(NSApp.windows.contains { $0.identifier?.rawValue == "main" && $0.isVisible }
+                           && NSApp.activationPolicy() == .accessory)
+                }
+            }
+        }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let model = Monitor.shared
-        if model.restoring { return .terminateCancel }
-        guard model.busy || model.receipt.recoveryRequired else { return .terminateNow }
+        if model.restoring || model.rulesStopping || model.rulesSaving { return .terminateCancel }
         if model.busy && model.activeFanID == nil {
             let pending = NSAlert()
             pending.messageText = "后台服务操作尚未结束"
@@ -522,16 +792,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pending.runModal()
             return .terminateCancel
         }
-        let alert = NSAlert()
-        alert.messageText = "风扇调速尚未结束"
-        alert.informativeText = "退出前需要确认恢复系统自动模式。"
-        alert.addButton(withTitle: "恢复自动后退出")
-        alert.addButton(withTitle: "取消")
-        if alert.runModal() == .alertFirstButtonReturn {
-            model.restore(fanID: model.activeFanID) { ok in NSApp.reply(toApplicationShouldTerminate: ok) }
-            return .terminateLater
+        if model.busy || model.receipt.recoveryRequired {
+            let alert = NSAlert()
+            alert.messageText = "风扇调速尚未结束"
+            alert.informativeText = "退出前需要确认恢复系统自动模式。"
+            alert.addButton(withTitle: "恢复自动后退出")
+            alert.addButton(withTitle: "取消")
+            if alert.runModal() != .alertFirstButtonReturn { return .terminateCancel }
         }
-        return .terminateCancel
+        guard model.hasRunner || model.rulesRecoveryRequired || model.receipt.recoveryRequired else { return .terminateNow }
+        model.prepareToQuit { [weak self] ok in
+            DispatchQueue.main.async {
+                if !ok { self?.showMain() }
+                NSApp.reply(toApplicationShouldTerminate: ok)
+            }
+        }
+        return .terminateLater
     }
     func applicationWillTerminate(_ notification: Notification) { Monitor.shared.shutdown() }
 }
@@ -540,18 +816,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct MacFanApplication: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = Monitor.shared
+    @Environment(\.openWindow) private var openWindow
     init() {
-        if CommandLine.arguments.contains("--smoke") && !CommandLine.arguments.contains("--demo") {
+        if (CommandLine.arguments.contains("--smoke") || CommandLine.arguments.contains("--startup-smoke"))
+            && !CommandLine.arguments.contains("--demo") {
             fputs("Native smoke testing requires --demo.\n", stderr)
             exit(2)
+        }
+        if CommandLine.arguments.contains("--login-item") {
+            guard let operation = loginItemOperation(Array(CommandLine.arguments.dropFirst())),
+                  LoginItemSettings.shared.command(operation) else {
+                fputs("Usage: MacFanUI [--demo] --login-item status|enable|disable\n", stderr)
+                exit(2)
+            }
+            exit(LoginItemSettings.shared.error == nil ? 0 : 1)
         }
     }
     var body: some Scene {
         Window("MacFan", id: "main") { MainView(model: model) }
+            .defaultLaunchBehavior(.suppressed)
+            .restorationBehavior(.disabled)
+            .onChange(of: model.mainWindowRequest) {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+            }
             .windowResizability(.contentSize)
             .windowToolbarStyle(.unifiedCompact)
             .windowStyle(.hiddenTitleBar)
-            .commands { CommandGroup(replacing: .appSettings) { Button("设置…") { model.showSettings = true }.keyboardShortcut(",") } }
+            .commands { CommandGroup(replacing: .appSettings) {
+                Button("设置…") { AppDelegate.instance?.showMain(); model.showSettings = true }.keyboardShortcut(",")
+            } }
             .commands {
                 CommandGroup(after: .windowArrangement) {
                     Button("显示主窗口") { AppDelegate.instance?.showMain() }.keyboardShortcut("0")
