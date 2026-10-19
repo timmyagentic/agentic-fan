@@ -15,8 +15,10 @@ def build(output):
     output.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-O', '-target', 'arm64-apple-macos15.0',
                     str(ROOT / 'native/Models.swift'), str(ROOT / 'native/Command.swift'),
-                    str(ROOT / 'native/MenuPopover.swift'), str(ROOT / 'native/MacFanUI.swift'),
-                    '-framework', 'SwiftUI', '-framework', 'AppKit', '-o', str(output)], check=True)
+                    str(ROOT / 'native/MenuPopover.swift'), str(ROOT / 'native/LoginItem.swift'),
+                    str(ROOT / 'native/MacFanUI.swift'),
+                    '-framework', 'SwiftUI', '-framework', 'AppKit', '-framework', 'ServiceManagement',
+                    '-o', str(output)], check=True)
     return output
 
 

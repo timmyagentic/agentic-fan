@@ -32,12 +32,24 @@ bash "$macfan_checkout/repo/scripts/install-macos.sh" --agent codex
 
 安装后的新 Agent 会话可以发现 `macfan` skill；当前会话可直接读取对应 `SKILL.md` 并使用 CLI。不要为了安装擅自重启用户正在使用的 Agent。
 
+首次正常打开已安装的 MacFan App 时，默认开启当前用户的登录自启。登录后只驻留菜单栏，不显示 Dock 图标，也不弹出或恢复主窗口。菜单栏的“打开主窗口”提供完整界面；应用设置中的“登录时自动启动”和 macOS 登录项设置均可关闭自启，后续启动会保留选择。只运行 CLI 或隔离安装测试不会注册登录项。
+
+App 启动时也会载入用户已有的温度规则；默认规则关闭。若先前已明确启用规则且 Helper 就绪，登录启动后也会按这些条件控扇。可先用 `macfan rules show` 查看配置，或用 `macfan rules disable --wait 8` 关闭并检查恢复回执。登录项开关与温度规则开关分别管理。
+
+Agent 可通过原生入口直接管理登录项，无需打开窗口。`status` 只读；`enable` / `disable` 对当前用户执行显式开关，返回 JSON 中的系统 `state`、`enabled` 和 `error`。这不会启动监测进程或修改风扇规则：
+
+```sh
+"$HOME/Applications/MacFan.app/Contents/MacOS/MacFanUI" --login-item status
+"$HOME/Applications/MacFan.app/Contents/MacOS/MacFanUI" --login-item enable
+"$HOME/Applications/MacFan.app/Contents/MacOS/MacFanUI" --login-item disable
+```
+
 ## 已下载的安装包
 
 已有 DMG 和同名 `.dmg.sha256` 文件时，可以离线安装，无需 GitHub CLI。Actions 下载包的根目录附带 `install-macos.sh`；源码仓库中的脚本位于 `scripts/`：
 
 ```sh
-bash /absolute/path/install-macos.sh --dmg /absolute/path/MacFan-0.4.1-arm64-dev.dmg --agent both
+bash /absolute/path/install-macos.sh --dmg /absolute/path/MacFan-0.5.1-arm64-dev.dmg --agent both
 ```
 
 为可重现安装，可使用 `--run-id ID` 固定到某次成功构建；安装器只接受本仓库的 push 或手动 DMG 构建，不会自动执行 PR 或其他仓库的产物。

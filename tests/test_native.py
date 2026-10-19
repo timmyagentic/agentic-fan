@@ -1,5 +1,6 @@
 """Native presentation contracts and the platform-neutral launcher boundary."""
 import os
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -14,6 +15,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class NativeTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Login item tests require the macOS Swift toolchain')
+    def test_native_login_item_policy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = str(Path(temporary) / 'login-items')
+            subprocess.run(['swiftc', str(ROOT / 'native/LoginItem.swift'), str(ROOT / 'native/LoginItemTests.swift'),
+                            '-o', binary], check=True, capture_output=True)
+            result = subprocess.run([binary], capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+
     def test_frozen_gui_passes_explicit_backend_and_demo_flags_without_shell(self):
         with patch.object(sys, 'platform', 'darwin'), patch.object(sys, 'frozen', True, create=True), \
                 patch.object(sys, 'executable', '/Applications/A quoted app/MacFan.app/Contents/MacOS/macfan'), \
@@ -27,9 +37,35 @@ class NativeTests(unittest.TestCase):
     def test_native_model_contracts(self):
         with tempfile.TemporaryDirectory() as temporary:
             binary = str(Path(temporary) / 'models')
-            subprocess.run(['swiftc', str(ROOT / 'native/Models.swift'), str(ROOT / 'native/Command.swift'), str(ROOT / 'native/ModelTests.swift'), '-o', binary], check=True, capture_output=True)
-            result = subprocess.run([binary, '--backend', sys.executable], capture_output=True, timeout=10)
-            self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+            subprocess.run(['swiftc', '-g', str(ROOT / 'native/Models.swift'), str(ROOT / 'native/Command.swift'), str(ROOT / 'native/ModelTests.swift'), '-o', binary], check=True, capture_output=True)
+            with subprocess.Popen([binary, '--backend', sys.executable], stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                try:
+                    stdout, stderr = process.communicate(timeout=30)
+                except subprocess.TimeoutExpired:
+                    try:
+                        sample = subprocess.run(['sample', str(process.pid), '1', '10'], capture_output=True, text=True, timeout=8)
+                        diagnostic = sample.stdout + sample.stderr
+                    except (OSError, subprocess.TimeoutExpired) as error:
+                        diagnostic = str(error)
+                    process.kill()
+                    stdout, stderr = process.communicate(timeout=5)
+                    self.fail(f"Native probe timed out. stdout={stdout!r}, stderr={stderr!r}\n{diagnostic}")
+                self.assertEqual(process.returncode, 0, stderr.decode(errors='replace'))
+
+    @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Native memory tests require the macOS Swift toolchain')
+    def test_native_stream_memory_stays_bounded_with_slow_consumer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result = subprocess.run([
+                sys.executable, str(ROOT / 'scripts/test-native-memory.py'),
+                '--output-dir', temporary, '--frames', '1000', '--timeout', '60',
+            ], capture_output=True, text=True, timeout=90)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            report = json.loads(result.stdout)
+            self.assertTrue(report['passed'])
+            run = report['runs'][-1]
+            self.assertTrue(run['warmup']['producer_running'])
+            self.assertTrue(run['after_replay']['producer_running'])
+            self.assertEqual(run['last_sample_sequence'], 1100)
 
 
 class HelperUpgradeTests(unittest.TestCase):

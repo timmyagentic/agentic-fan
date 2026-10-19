@@ -1,10 +1,16 @@
 # Mac 应用与 DMG 构建
 
-交付物为 `MacFan.app`，放在真正的 UDZO/HFS+ DMG 中，附带指向 `/Applications` 的拖放安装链接。应用携带 Python、Tk 和全部 Python 模块；终端、Agent 与 GUI 都使用 `Contents/MacOS/macfan`。不要求用户安装 Python 或 pip。
+交付物为 `MacFan.app`，放在真正的 UDZO/HFS+ DMG 中，附带指向 `/Applications` 的拖放安装链接。应用携带原生 SwiftUI 入口 `Contents/MacOS/MacFanUI`、Python 和全部 Python 模块；原生界面通过 `Contents/MacOS/macfan` 与终端、Agent 共用核心。不要求用户安装 Python 或 pip。
+
+MacFan 常驻菜单栏，打开主窗口、关闭窗口和收起菜单栏弹窗时都不显示 Dock 图标，也不占用 Command-Tab 应用切换器。菜单栏保留“打开主窗口”和“退出”入口；主窗口关闭后继续监测。打包声明 `LSUIElement=true`，原生入口也使用 accessory 激活策略，菜单栏弹窗不会再将应用切回普通 Dock 应用。
+
+已安装的 App 首次正常启动时，默认通过 `SMAppService.mainApp` 注册当前用户的登录项。以后登录时自动启动，只在菜单栏显示，不自动打开或恢复上次的主窗口；需要时由菜单栏按需打开。应用设置可关闭“登录时自动启动”，系统设置中关闭的选择也会保留，后续启动不会重新开启。注册失败会在应用设置显示错误；系统要求允许时，提供登录项设置入口。
+
+自启启动原生 App，并使用同一监测核心，不修改规则配置或 Helper 权限。若用户已经启用温度规则且 Helper 就绪，规则会随 App 启动并按配置控扇；默认规则关闭。构建中的 `--demo` / smoke 启动完全跳过登录项与首次配置标记，并强制使用临时演示规则路径，不继承构建用户的 `MACFAN_RULES_PATH`。隔离安装也不会注册构建机用户的登录项。
 
 ## 在 Apple Silicon Mac 构建
 
-需要 macOS 15+、带 Tk 的 arm64 Python 3.12、Xcode Command Line Tools 和可用的桌面会话。不要使用 Rosetta 下的 x86_64 Python。
+需要 macOS 15+、arm64 Python 3.12、Xcode Command Line Tools 和可用的桌面会话。不要使用 Rosetta 下的 x86_64 Python。
 
 ```sh
 python3 -m venv .venv
@@ -15,7 +21,7 @@ python3 -m venv .venv
 
 默认产物：
 
-- `MacFan-0.3.0-arm64-dev.dmg`：ad-hoc 签名、未经公证的开发包。
+- `MacFan-<version>-arm64-dev.dmg`：ad-hoc 签名、未经公证的开发包。
 - 同名 `.dmg.sha256`：完整 DMG 的 SHA-256。
 - 同名前缀 `.build.json`：工具版本、架构、签名、公证状态与完成的打包检查。
 - `install-macos.sh` 和 `INSTALL.md`：Agent 安装脚本和安装说明；可用本地 DMG 离线安装。
@@ -25,6 +31,8 @@ python3 -m venv .venv
 ## 构建检查
 
 构建器会检查应用签名，并从源码目录之外运行内置 CLI 的 `schema`、模拟快照和有限控扇会话；后者必须返回自动模式恢复确认。随后启动窗口演示，检查传感器与风扇表格加载成功。生成 DMG 后，再验证、只读挂载磁盘镜像，核对应用与安装链接，并在挂载卷中重跑 CLI 和窗口检查。
+
+原生启动 smoke 另外检查：冷启动没有主窗口、显式请求后出现主窗口、关闭后可以再次打开、全过程保持 accessory 策略。模拟检查不验证真实登录项注册；真实登录后启动仍需在目标用户会话中验收。
 
 所有这些功能检查只操作显式模拟器，不改写构建机器的风扇。真实硬件读写仍需 [独立验收](hardware-validation.md)。直接启动内置可执行文件的检查也不能替代从 Finder 双击、管理员授权对话框、拖放安装和 Gatekeeper 的人工验收。
 
