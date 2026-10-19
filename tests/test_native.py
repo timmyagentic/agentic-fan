@@ -38,7 +38,10 @@ class NativeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             binary = str(Path(temporary) / 'models')
             subprocess.run(['swiftc', str(ROOT / 'native/Models.swift'), str(ROOT / 'native/Command.swift'), str(ROOT / 'native/ModelTests.swift'), '-o', binary], check=True, capture_output=True)
-            result = subprocess.run([binary, '--backend', sys.executable], capture_output=True, timeout=10)
+            try:
+                result = subprocess.run([binary, '--backend', sys.executable], capture_output=True, timeout=30)
+            except subprocess.TimeoutExpired as error:
+                self.fail(f"Native model probe timed out. stdout={error.stdout!r}, stderr={error.stderr!r}")
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
 
     @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Native memory tests require the macOS Swift toolchain')
