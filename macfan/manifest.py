@@ -2,11 +2,12 @@
 
 from . import SCHEMA_VERSION, __version__
 from .temperatures import POLICY, STATUSES
+from .rules import DEFAULT
 
 MANIFEST = {
     "name": "macfan", "version": __version__, "schema_version": SCHEMA_VERSION,
     "temperature_validation_policy": dict(POLICY),
-    "description": "Local Mac temperature monitoring and bounded manual fan control.",
+    "description": "Local Mac temperature monitoring, bounded fan control and editable temperature rules.",
     "network_required": False, "model_required": False,
     "desktop_entry": {"option": "--gui", "default_when_bundled_without_arguments": True,
                       "cli_path": "/Applications/MacFan.app/Contents/MacOS/macfan"},
@@ -32,6 +33,19 @@ MANIFEST = {
         {"command": "watch", "effect": "read", "stream": True,
          "options": {"--interval": {"type": "number", "minimum": 0.2, "maximum": 3600, "default": 1},
                      "--count": {"type": "integer", "minimum": 1, "default": None}}},
+        {"command": "rules show", "effect": "read", "stream": False, "hardware_required": False},
+        {"command": "rules validate", "effect": "read", "stream": False, "hardware_required": False},
+        {"command": "rules apply", "effect": "user_configuration_write", "stream": False,
+         "description": "Validate and atomically save JSON from --file or --stdin. --if-revision prevents stale edits; --wait reports runtime loading separately."},
+        {"command": "rules enable", "effect": "user_configuration_write", "stream": False,
+         "description": "Enable existing rules; a running native app or rules runner may then control the selected fan."},
+        {"command": "rules disable", "effect": "user_configuration_write", "stream": False,
+         "description": "Disable rules; --wait waits for a live runner to stop its owned control."},
+        {"command": "rules status", "effect": "read", "stream": False, "hardware_required": False},
+        {"command": "rules run", "effect": "hardware_write_when_enabled", "stream": True, "foreground": True,
+         "requires_helper": True, "restores_auto": True,
+         "options": {"--parent-watch": {"type": "boolean", "default": False, "description": "Stop on stdin EOF."},
+                     "--count": {"type": "integer", "minimum": 1, "default": None}}},
         {"command": "fans set", "effect": "hardware_write", "requires_root": False, "requires_helper": True, "stream": True,
          "foreground": True, "restores_auto": True,
          "options": {"--fan": {"type": "string", "repeatable": True, "required": True, "description": "Zero-based fan ID, or all."},
@@ -50,7 +64,7 @@ MANIFEST = {
         "properties": {
             "schema_version": {"const": SCHEMA_VERSION}, "ok": {"type": "boolean"}, "simulated": {"type": "boolean"},
             "timestamp": {"type": "string", "format": "date-time"},
-            "event": {"enum": ["sample", "control_started", "control_confirmed", "control_finished"]},
+            "event": {"enum": ["sample", "control_started", "control_confirmed", "control_finished", "rules_finished"]},
             "data": {"type": "object", "properties": {
                 "sensors": {"type": "array", "items": {"$ref": "#/$defs/temperature_sensor"}},
                 "sensor_issues": {"type": "array", "items": {"$ref": "#/$defs/temperature_sensor"}},
@@ -76,6 +90,8 @@ MANIFEST = {
                   {"properties": {"ok": {"const": False}}, "required": ["error"]}]
     },
     "semantics": {
+        "temperature_rules": "One local JSON configuration shared by CLI and native app. Rules start disabled. Only identified ok points included in temperature_overview can trigger; calibration/reference rows are excluded. Multiple rules target one selected fan and choose the highest active RPM. Restore after continuously observed release_seconds below release_celsius; missing/stale data releases owned control. A five-second guardian heartbeat lease expires if the runner stalls. External auto requests pause rules until explicit config reapply. The runner lifetime is the native app (closing its window keeps it running) or a foreground rules run command; saving alone never starts a runner.",
+        "rules_receipts": "saved means persisted, loaded means a live runner observed this exact file generation, active/cooling means a rule requests control, and control_confirmed means observed RPM reached tolerance. rules status is stale after four seconds without a heartbeat. rules_finished automatic_mode_verified only covers outstanding writes owned by this runner, not other controllers.",
         "sensor_labels": "Additive display_name/group/group_name/label_status/label_source/label_note fields. Original id and name stay unchanged. community_mapping is chip-scoped; system_name translates IOHID Product. label_verified remains false; neither source proves physical calibration or a physical core number.",
         "temperature_overview": "Per identified group, the maximum of currently valid mapped points, with contributing IDs and value_sensor_id. Unknown and calibration rows are excluded. This is not a package sensor or an average. Missing valid data returns null.",
         "authorization": "Run helper install once as the normal user. Subsequent set/auto commands use the local helper without sudo or prompts. Updating/removing the helper may require authorization again. Access is granted to processes of that user, not authenticated by app identity.",
@@ -92,6 +108,31 @@ MANIFEST = {
         "control_confirmed": "Every selected fan was observed within max(100 RPM, 8 percent) of target.",
         "stream_format": "NDJSON: each stdout line is an independent envelope. Read through the final event and check process exit status.",
         "cancel": "Ctrl-C/SIGTERM, closing the consumer, or loss of the CLI triggers guardian restoration. fans auto can interrupt a live session.",
-        "limitations": "No guarantee if the guardian is killed or blocked, the OS/kernel fails, or another controller races. No SMART disks, fan curves, or bundled AI model."
+        "limitations": "No guarantee if the guardian is killed or blocked, the OS/kernel fails, or another controller races. No SMART disks, interpolated fan curves, or bundled AI model."
     }
+}
+
+MANIFEST["rules_configuration"] = {
+    "path": "~/Library/Application Support/MacFan/rules.json", "environment_override": "MACFAN_RULES_PATH",
+    "default": DEFAULT,
+    "schema": {
+        "type": "object", "additionalProperties": False, "required": ["version", "enabled", "fan", "rules"],
+        "properties": {
+            "version": {"const": 1}, "enabled": {"type": "boolean"},
+            "fan": {"type": "integer", "minimum": 0, "maximum": 9},
+            "rules": {"type": "array", "minItems": 1, "maxItems": 16, "items": {
+                "type": "object", "additionalProperties": False,
+                "required": ["id", "enabled", "sensor_group", "trigger_celsius", "release_celsius", "release_seconds", "target_rpm"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$"},
+                    "enabled": {"type": "boolean"},
+                    "sensor_group": {"enum": ["cpu", "gpu", "memory", "storage", "wireless", "power", "battery", "neural", "system"]},
+                    "trigger_celsius": {"type": "number", "minimum": -40, "maximum": 150},
+                    "release_celsius": {"type": "number", "minimum": -40, "maximum": 150},
+                    "release_seconds": {"type": "number", "minimum": 0, "maximum": 300},
+                    "target_rpm": {"oneOf": [{"const": "max"}, {"type": "integer", "minimum": 1, "maximum": 16383}]},
+                },
+            }},
+        },
+    },
 }

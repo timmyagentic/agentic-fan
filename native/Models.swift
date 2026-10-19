@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 
 struct Fan: Decodable, Identifiable {
     let id: Int
@@ -50,6 +51,79 @@ struct Snapshot: Decodable {
     let sensors: [Sensor]
     let fans: [Fan]
     let temperatureOverview: [Component]
+    let rules: RulesRuntime?
+}
+enum RuleTarget: Decodable, Equatable {
+    case maximum
+    case rpm(Int)
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer()
+        if let name = try? value.decode(String.self), name == "max" { self = .maximum }
+        else { self = .rpm(try value.decode(Int.self)) }
+    }
+    var title: String {
+        switch self {
+        case .maximum: return "最高转速"
+        case .rpm(let value): return "\(value) RPM"
+        }
+    }
+}
+struct TemperatureRule: Decodable, Identifiable {
+    let id: String
+    let enabled: Bool
+    let sensorGroup: String
+    let triggerCelsius: Double
+    let releaseCelsius: Double
+    let releaseSeconds: Double
+    let targetRpm: RuleTarget
+    var summary: String {
+        let name = ["cpu": "CPU", "gpu": "GPU", "memory": "内存附近", "storage": "SSD", "wireless": "无线网络", "power": "电源管理"][sensorGroup] ?? sensorGroup
+        return "\(name) ≥\(ruleNumber(triggerCelsius))°C → \(targetRpm.title)；≤\(ruleNumber(releaseCelsius))°C 持续 \(ruleNumber(releaseSeconds)) 秒后解除"
+    }
+}
+struct RulesConfiguration: Decodable {
+    let version: Int
+    let enabled: Bool
+    let fan: Int
+    let rules: [TemperatureRule]
+}
+struct RulesRuntime: Decodable {
+    let enabled: Bool
+    let status: String
+    let configPath: String
+    let loadedRevision: String?
+    let config: RulesConfiguration?
+    let desiredRpm: Int?
+    let activeRuleIds: [String]
+    let error: String?
+    let automaticModeVerified: Bool?
+    let controlConfirmed: Bool
+    let controlActive: Bool?
+    var statusText: String {
+        ["disabled": "规则已关闭", "watching": "规则监测中", "active": "温度规则已触发", "cooling": "降温确认中", "restoring": "正在恢复系统自动", "paused": "规则已暂停", "error": "规则运行异常"][status] ?? status
+    }
+    var mayOwnControl: Bool { controlActive == true || desiredRpm != nil || ["active", "cooling", "restoring"].contains(status) }
+}
+func ruleNumber(_ value: Double) -> String {
+    String(format: value.rounded() == value ? "%.0f" : "%.1f", value)
+}
+func ruleDocument(_ object: Any) throws -> String {
+    let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+    return String(decoding: data, as: UTF8.self)
+}
+func ruleDocumentEnabled(_ document: String) -> Bool? {
+    guard let data = document.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let value = object["enabled"] as? NSNumber, CFGetTypeID(value) == CFBooleanGetTypeID() else { return nil }
+    return value.boolValue
+}
+func ruleDocument(_ document: String, enabled: Bool) throws -> String {
+    let data = Data(document.utf8)
+    guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        throw NSError(domain: "MacFan", code: 2, userInfo: [NSLocalizedDescriptionKey: "规则必须是 JSON 对象。"])
+    }
+    object["enabled"] = enabled
+    return try ruleDocument(object)
 }
 struct ControlReceipt {
     var target: Int?

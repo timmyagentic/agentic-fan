@@ -79,3 +79,7 @@ v2 的迁移变化：`value` 只在 `status=ok` 时为数字；`invalid`、`unve
 `doctor` 新增 `helper` 与 `control_ready`。`write_requires_root` 为 false，`hardware_write_requires_privilege` 为 true：权限在服务端，Agent 本身不提权。Helper 授权边界是本机用户 UID；该用户的进程均可发起限定请求。
 
 温度行增加 `display_name`、`group`、`group_name`、`label_status`、`label_source`、`label_note`。`temperature_overview` 提供按部件分组的有效已识别测点最高值与来源ID。可用 `sensors --group cpu` 等过滤；原 `id`、`name` 和原始读数保持不变。详情见 [命名说明](sensor-labels.md)。
+
+## 可编辑温度规则
+
+`rules show/validate/apply/enable/disable/status/run` 与原生界面共享用户本地 JSON。配置 Schema 在 `schema.rules_configuration`；字段、原子更新、修订冲突、状态回执与控制生命周期见[温度规则](temperature-rules.md)。
