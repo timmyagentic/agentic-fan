@@ -3,7 +3,7 @@ import AppKit
 // A status item is visible in other apps' full-screen Spaces, but its popover
 // doesn't inherit that behavior. Configure the actual AppKit-created window.
 final class MenuPopover: NSPopover, NSPopoverDelegate {
-    private var previousActivationPolicy: NSApplication.ActivationPolicy?
+    private var presentsAcrossSpaces = false
     override init() {
         super.init()
         delegate = self
@@ -14,29 +14,16 @@ final class MenuPopover: NSPopover, NSPopoverDelegate {
     required init?(coder: NSCoder) { super.init(coder: coder); delegate = self }
 
     override func show(relativeTo positioningRect: NSRect, of positioningView: NSView, preferredEdge: NSRectEdge) {
-        // Regular foreground apps cannot overlay another app's full-screen Space.
-        // Only borrow accessory behavior while presenting from an inactive Space;
-        // the normal main-window/Dock behavior is restored when the popover closes.
-        if NSApp.activationPolicy() == .regular && positioningView.window?.isOnActiveSpace == false {
-            previousActivationPolicy = .regular
-            NSApp.setActivationPolicy(.accessory)
-        }
+        // The app stays accessory. Only detach the panel for another Space.
+        presentsAcrossSpaces = positioningView.window?.isOnActiveSpace == false
         super.show(relativeTo: positioningRect, of: positioningView, preferredEdge: preferredEdge)
-        if !isShown { restoreActivationPolicy() }
-    }
-
-    func popoverDidClose(_ notification: Notification) { restoreActivationPolicy() }
-
-    private func restoreActivationPolicy() {
-        guard let previous = previousActivationPolicy else { return }
-        previousActivationPolicy = nil
-        NSApp.setActivationPolicy(previous)
+        if !isShown { presentsAcrossSpaces = false }
     }
 
     func popoverWillShow(_ notification: Notification) { prepareWindow() }
 
     func popoverDidShow(_ notification: Notification) {
-        guard previousActivationPolicy != nil else { return }
+        guard presentsAcrossSpaces else { return }
         // On the first presentation AppKit may create the window after willShow.
         // The status item's backing window can remain in the desktop Space even
         // when its button appears in a full-screen menu bar. A child window inherits
@@ -49,7 +36,7 @@ final class MenuPopover: NSPopover, NSPopoverDelegate {
     }
 
     private func prepareWindow() {
-        guard previousActivationPolicy != nil, let window = contentViewController?.view.window else { return }
+        guard presentsAcrossSpaces, let window = contentViewController?.view.window else { return }
         window.collectionBehavior = [
             .canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications,
             .transient, .ignoresCycle

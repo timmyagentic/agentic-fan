@@ -15,6 +15,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class NativeTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Login item tests require the macOS Swift toolchain')
+    def test_native_login_item_policy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = str(Path(temporary) / 'login-items')
+            subprocess.run(['swiftc', str(ROOT / 'native/LoginItem.swift'), str(ROOT / 'native/LoginItemTests.swift'),
+                            '-o', binary], check=True, capture_output=True)
+            result = subprocess.run([binary], capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+
     def test_frozen_gui_passes_explicit_backend_and_demo_flags_without_shell(self):
         with patch.object(sys, 'platform', 'darwin'), patch.object(sys, 'frozen', True, create=True), \
                 patch.object(sys, 'executable', '/Applications/A quoted app/MacFan.app/Contents/MacOS/macfan'), \
