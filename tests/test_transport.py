@@ -5,10 +5,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from macfan.codecs import KeyInfo, key_number
-from macfan.errors import MacFanError, MissingKey
-from macfan.runtime import lock, runtime_directory
-from macfan.smc import AppleSMC, SMCData
+from agenticfan.codecs import KeyInfo, key_number
+from agenticfan.errors import AgenticFanError, MissingKey
+from agenticfan.runtime import lock, runtime_directory
+from agenticfan.smc import AppleSMC, SMCData
 
 
 class TransportTests(unittest.TestCase):
@@ -55,7 +55,7 @@ class TransportTests(unittest.TestCase):
             out.result = 1
             return 0
         self.install_call(call)
-        with self.assertRaises(MacFanError) as caught:
+        with self.assertRaises(AgenticFanError) as caught:
             self.smc.info("F0Tg")
         self.assertEqual(caught.exception.code, "SMC_COMMAND_FAILED")
 
@@ -69,7 +69,7 @@ class TransportTests(unittest.TestCase):
 
     def test_kernel_error_is_reported(self):
         self.install_call(lambda req, out, length: 0xE00002C1)
-        with self.assertRaises(MacFanError) as caught:
+        with self.assertRaises(AgenticFanError) as caught:
             self.smc.info("F0Tg")
         self.assertEqual(caught.exception.code, "SMC_IO_ERROR")
 
@@ -78,7 +78,7 @@ class TransportTests(unittest.TestCase):
             length.value = 79
             return 0
         self.install_call(call)
-        with self.assertRaises(MacFanError) as caught:
+        with self.assertRaises(AgenticFanError) as caught:
             self.smc.info("F0Tg")
         self.assertEqual(caught.exception.code, "SMC_SHORT_RESPONSE")
 
@@ -87,7 +87,7 @@ class TransportTests(unittest.TestCase):
             out.info.size = 33
             return 0
         self.install_call(call)
-        with self.assertRaises(MacFanError) as caught:
+        with self.assertRaises(AgenticFanError) as caught:
             self.smc.read("Tbad")
         self.assertEqual(caught.exception.code, "SMC_INVALID_SIZE")
         self.assertEqual(self.commands, [9])
@@ -99,14 +99,14 @@ class RuntimeTests(unittest.TestCase):
             directory = Path(parent) / "state"
             directory.mkdir(mode=0o755)
             directory.chmod(0o755)  # Do not let the runner's umask make this fixture private.
-            with patch.dict(os.environ, {"MACFAN_DEMO_DIR": str(directory)}):
-                with self.assertRaises(MacFanError):
+            with patch.dict(os.environ, {"AGENTICFAN_DEMO_DIR": str(directory)}):
+                with self.assertRaises(AgenticFanError):
                     runtime_directory(True)
             directory.chmod(0o700)
             link = Path(parent) / "link"
             link.symlink_to(directory)
-            with patch.dict(os.environ, {"MACFAN_DEMO_DIR": str(link)}):
-                with self.assertRaises(MacFanError):
+            with patch.dict(os.environ, {"AGENTICFAN_DEMO_DIR": str(link)}):
+                with self.assertRaises(AgenticFanError):
                     runtime_directory(True)
 
     def test_lock_does_not_follow_symlink(self):

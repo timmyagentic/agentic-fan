@@ -10,55 +10,55 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from macfan import entry, gui, launch
-from macfan.errors import MacFanError
-from macfan.protocol import success
+from agenticfan import entry, gui, launch
+from agenticfan.errors import AgenticFanError
+from agenticfan.protocol import success
 
 
 class DesktopTests(unittest.TestCase):
     def test_frozen_finder_launch_opens_gui_but_commands_stay_cli(self):
-        with patch.object(sys, "frozen", True, create=True), patch("macfan.gui.main", return_value=0) as window:
+        with patch.object(sys, "frozen", True, create=True), patch("agenticfan.gui.main", return_value=0) as window:
             self.assertEqual(entry.main(["-psn_0_123"]), 0)
             window.assert_called_once_with(demo=False, smoke_test=False)
-        with patch.object(sys, "frozen", True, create=True), patch("macfan.cli.main", return_value=0) as cli:
+        with patch.object(sys, "frozen", True, create=True), patch("agenticfan.cli.main", return_value=0) as cli:
             self.assertEqual(entry.main(["--demo", "snapshot"]), 0)
             cli.assert_called_once_with(["--demo", "snapshot"])
 
     def test_frozen_guardian_has_its_own_entry_instead_of_reopening_gui(self):
-        with patch.object(sys, "frozen", True, create=True), patch("macfan.guardian.main", return_value=0) as guardian:
+        with patch.object(sys, "frozen", True, create=True), patch("agenticfan.guardian.main", return_value=0) as guardian:
             self.assertEqual(entry.main(launch.guardian_command()[1:]), 0)
             guardian.assert_called_once_with()
 
     def test_gui_does_not_accept_hidden_hardware_commands(self):
-        with patch("macfan.gui.main") as window, contextlib.redirect_stdout(io.StringIO()) as output:
+        with patch("agenticfan.gui.main") as window, contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(entry.main(["--gui", "fans", "set"]), 2)
             window.assert_not_called()
         self.assertEqual(json.loads(output.getvalue())["error"]["code"], "INVALID_ARGUMENT")
 
     def test_gui_smoke_test_requires_simulated_hardware(self):
-        with patch("macfan.gui.main") as window, contextlib.redirect_stdout(io.StringIO()):
+        with patch("agenticfan.gui.main") as window, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(entry.main(["--gui", "--gui-smoke-test"]), 2)
             window.assert_not_called()
 
     def test_invalid_gui_control_input_never_reaches_a_subprocess(self):
         for rpm, duration in (("0", "1"), ("3000; touch bad", "1"), ("3000", "nan"), ("3000", "0"), ("3000", "3601")):
-            with self.subTest(rpm=rpm, duration=duration), self.assertRaises(MacFanError):
+            with self.subTest(rpm=rpm, duration=duration), self.assertRaises(AgenticFanError):
                 gui.control_arguments(0, rpm, duration)
 
     def test_gui_consumes_a_real_demo_session_and_verified_restore(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"MACFAN_DEMO_DIR": directory}):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"AGENTICFAN_DEMO_DIR": directory}):
             result = gui.run_control(gui.control_arguments(0, "3000", "1"), demo=True, timeout=10)
         self.assertTrue(result["simulated"])
         self.assertEqual(result["event"], "control_finished")
         self.assertTrue(result["data"]["automatic_mode_verified"])
 
     def test_gui_uses_normal_cli_after_helper_is_enabled(self):
-        executable = "/Applications/A path with 'quotes'/MacFan.app/Contents/MacOS/macfan"
+        executable = "/Applications/A path with 'quotes'/AgenticFan.app/Contents/MacOS/agenticfan"
         reply = success({"automatic_mode_verified": True})
         completed = subprocess.CompletedProcess([], 0, json.dumps(reply) + "\r", "")
         with patch.object(sys, "frozen", True, create=True), patch.object(sys, "platform", "darwin"), \
-                patch.object(sys, "executable", executable), patch("macfan.helper.status", return_value={"running": True, "compatible": True}), \
-                patch("macfan.helper_install.manage") as manage, patch("macfan.gui.subprocess.run", return_value=completed) as run:
+                patch.object(sys, "executable", executable), patch("agenticfan.helper.status", return_value={"running": True, "compatible": True}), \
+                patch("agenticfan.helper_install.manage") as manage, patch("agenticfan.gui.subprocess.run", return_value=completed) as run:
             gui.run_control(["fans", "auto", "--fan", "all"], demo=False, timeout=10)
         command = run.call_args.args[0]
         self.assertEqual(command, [executable, "fans", "auto", "--fan", "all"])
@@ -74,14 +74,14 @@ class DesktopTests(unittest.TestCase):
     def test_gui_does_not_claim_restore_if_child_only_started(self):
         started = success({"rpm": 3000}, simulated=True, event="control_started")
         completed = subprocess.CompletedProcess([], 0, json.dumps(started), "")
-        with patch("macfan.gui.subprocess.run", return_value=completed), self.assertRaises(MacFanError) as raised:
+        with patch("agenticfan.gui.subprocess.run", return_value=completed), self.assertRaises(AgenticFanError) as raised:
             gui.run_control(["fans", "set"], demo=True, timeout=10)
         self.assertEqual(raised.exception.code, "RESTORE_UNCONFIRMED")
 
     def test_packaging_smoke_keeps_user_rules_state_outside_demo(self):
-        from macfan import rules
+        from agenticfan import rules
         script = Path(__file__).resolve().parents[1] / "packaging/macos/build.py"
-        spec = importlib.util.spec_from_file_location("macfan_dmg_build", script)
+        spec = importlib.util.spec_from_file_location("agenticfan_dmg_build", script)
         builder = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(builder)
         captured = {}
@@ -102,12 +102,12 @@ class DesktopTests(unittest.TestCase):
             original_config, original_state = user_rules.read_bytes(), user_state.read_bytes()
             work = root / "build-smoke"
             work.mkdir()
-            with patch.dict(os.environ, {"MACFAN_RULES_PATH": str(user_rules)}), \
+            with patch.dict(os.environ, {"AGENTICFAN_RULES_PATH": str(user_rules)}), \
                     patch.object(builder, "run", side_effect=capture), self.assertRaises(EnvironmentCaptured):
-                builder.smoke(root / "MacFan.app/Contents/MacOS/macfan", work)
+                builder.smoke(root / "AgenticFan.app/Contents/MacOS/agenticfan", work)
             # Exercise the same runner started by the native UI using the actual
             # environment passed by the packager, not a simulated filesystem.
-            result = subprocess.run([sys.executable, "-m", "macfan", "--demo", "rules", "run", "--count", "1"],
+            result = subprocess.run([sys.executable, "-m", "agenticfan", "--demo", "rules", "run", "--count", "1"],
                                     env=captured, cwd=script.parents[2], capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
             messages = [json.loads(line) for line in result.stdout.splitlines()]
@@ -119,7 +119,7 @@ class DesktopTests(unittest.TestCase):
     @unittest.skipIf(sys.platform == "darwin", "Non-macOS build guard only")
     def test_dmg_builder_rejects_linux_without_creating_an_artifact(self):
         script = Path(__file__).resolve().parents[1] / "packaging/macos/build.py"
-        spec = importlib.util.spec_from_file_location("macfan_dmg_build", script)
+        spec = importlib.util.spec_from_file_location("agenticfan_dmg_build", script)
         builder = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(builder)
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stderr(io.StringIO()) as output:

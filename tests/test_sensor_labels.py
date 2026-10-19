@@ -1,5 +1,5 @@
 import unittest
-from macfan.sensor_labels import annotate, describe, overview
+from agenticfan.sensor_labels import annotate, describe, overview
 
 
 def row(key, value=45, source='smc', status='ok'):

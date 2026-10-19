@@ -25,5 +25,5 @@ jobs:
       - name: Download, install and verify through the same entry point as users
         env:
           GH_TOKEN: ${{ github.token }}
-          MACFAN_RUN_ID: ${{ inputs.run_id }}
-        run: python packaging/macos/test_install.py --run-id "$MACFAN_RUN_ID"
+          AGENTICFAN_RUN_ID: ${{ inputs.run_id }}
+        run: python packaging/macos/test_install.py --run-id "$AGENTICFAN_RUN_ID"

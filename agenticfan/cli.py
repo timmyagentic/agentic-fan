@@ -12,7 +12,7 @@ import sys
 import time
 
 from . import __version__
-from .errors import MacFanError, invalid
+from .errors import AgenticFanError, invalid
 from .guardian import validate_duration
 from .hardware import native_hardware
 from .manifest import MANIFEST
@@ -65,7 +65,7 @@ def parser():
     rule_actions = rules.add_subparsers(dest="rules_action", required=True)
     for name in ("show", "validate", "apply", "enable", "disable", "status", "run"):
         command = rule_actions.add_parser(name)
-        command.add_argument("--config", type=Path, help="rules destination (default: MACFAN_RULES_PATH or ~/Library/Application Support/MacFan/rules.json)")
+        command.add_argument("--config", type=Path, help="rules destination (default: AGENTICFAN_RULES_PATH or ~/Library/Application Support/AgenticFan/rules.json)")
         if name in ("apply", "enable", "disable"):
             command.add_argument("--wait", type=float, default=0, help="wait up to 10 seconds for the runner to load this exact generation")
             command.add_argument("--if-revision", help="reject instead of overwriting an externally edited revision")
@@ -139,7 +139,7 @@ def control_process(config):
     result = process.wait()
     if result < 0 or (not interrupted and (not last_message or
             (last_message.get("ok") and last_message.get("event") != "control_finished"))):
-        emit(failure(MacFanError("RESTORE_UNCONFIRMED", "The control process exited without a verified restoration result. Run fans auto and inspect the hardware.",
+        emit(failure(AgenticFanError("RESTORE_UNCONFIRMED", "The control process exited without a verified restoration result. Run fans auto and inspect the hardware.",
                                 7, guardian_exit_status=result), config["demo"]))
         return 7
     return 130 if interrupted and result == 0 else result
@@ -174,7 +174,7 @@ def main(argv=None):
             if os.geteuid() == 0:
                 raise invalid("Install Agent integration as the current user, without sudo.")
             if not getattr(sys, "frozen", False):
-                raise invalid("Run agent install using the executable inside the installed MacFan.app.")
+                raise invalid("Run agent install using the executable inside the installed AgenticFan.app.")
             from .agent import integrate
             emit(success(integrate(Path(sys.executable), args.user_root, args.target)))
             return 0
@@ -260,7 +260,7 @@ def main(argv=None):
             sensors = [row for row in hw.temperatures() if args.source in ("all", row["source"])
                        and args.group in ("all", row.get("group", "unknown"))]
             if not sensors:
-                raise MacFanError("NO_TEMPERATURE_SENSORS", "No temperature sensors matched the requested source and component group.", 3, warnings=hw.warnings)
+                raise AgenticFanError("NO_TEMPERATURE_SENSORS", "No temperature sensors matched the requested source and component group.", 3, warnings=hw.warnings)
             emit(success(sensor_report(sensors, hw.warnings), args.demo))
         elif args.command == "snapshot":
             emit(success(snapshot(hw), args.demo))
@@ -293,7 +293,7 @@ def main(argv=None):
                 if args.count is None or count < args.count:
                     time.sleep(max(0, args.interval - (time.monotonic() - started)))
         return 0
-    except MacFanError as exc:
+    except AgenticFanError as exc:
         emit(failure(exc, args.demo if args else "--demo" in raw_args))
         return exc.exit_code
     except KeyboardInterrupt:
@@ -303,7 +303,7 @@ def main(argv=None):
         sys.stdout = open(os.devnull, "w")
         return 0
     except (OSError, ValueError) as exc:
-        emit(failure(MacFanError("IO_ERROR", str(exc)), args.demo if args else False))
+        emit(failure(AgenticFanError("IO_ERROR", str(exc)), args.demo if args else False))
         return 5
     finally:
         if hw:

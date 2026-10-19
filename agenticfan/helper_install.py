@@ -17,7 +17,7 @@ import tempfile
 import time
 
 from . import __version__
-from .errors import MacFanError, invalid
+from .errors import AgenticFanError, invalid
 from .helper import APP, BASE, CONFIG, EXECUTABLE, LABEL, PLIST, SOCKET, SOCKET_DIRECTORY, check_root_path
 from .runtime import lock, runtime_directory
 
@@ -43,9 +43,9 @@ def stop_helper():
         if state.returncode in (3, 113):  # ESRCH / launchd service-not-found
             return
         if state.returncode != 0:
-            raise MacFanError('HELPER_STOP_FAILED', 'Cannot verify that the existing helper has stopped.', 4)
+            raise AgenticFanError('HELPER_STOP_FAILED', 'Cannot verify that the existing helper has stopped.', 4)
         if time.monotonic() >= deadline:
-            raise MacFanError('HELPER_STOP_FAILED', 'The existing helper did not stop within ten seconds.', 4)
+            raise AgenticFanError('HELPER_STOP_FAILED', 'The existing helper did not stop within ten seconds.', 4)
         time.sleep(.1)
 
 
@@ -84,13 +84,13 @@ def installed_owner():
 
 def install_privileged(uid):
     if os.geteuid() != 0 or not getattr(sys, 'frozen', False):
-        raise MacFanError('PERMISSION_DENIED', 'Helper installation requires the bundled app and administrator authorization.', 4)
+        raise AgenticFanError('PERMISSION_DENIED', 'Helper installation requires the bundled app and administrator authorization.', 4)
     if type(uid) is not int or uid < 501:
         raise invalid('Authorize a regular local user.')
     pwd.getpwuid(uid)  # refuse non-existent accounts
     source = Path(sys.executable).resolve().parents[2]
     info = plistlib.loads((source / 'Contents/Info.plist').read_bytes())
-    if info.get('CFBundleIdentifier') != 'io.github.timmyagentic.macfan':
+    if info.get('CFBundleIdentifier') != 'io.github.timmyagentic.agenticfan':
         raise invalid('Unexpected application bundle.')
     run('/usr/bin/codesign', '--verify', '--deep', '--strict', source)
     # Validate trusted parent directories before creating or replacing files.
@@ -99,7 +99,7 @@ def install_privileged(uid):
     BASE.mkdir(mode=0o755, exist_ok=True)
     check_root_path(BASE, directory=True)
     if installed_owner() not in (None, uid):
-        raise MacFanError('HELPER_ACCESS_DENIED', 'Helper belongs to another local user. Remove it explicitly before changing ownership.', 4)
+        raise AgenticFanError('HELPER_ACCESS_DENIED', 'Helper belongs to another local user. Remove it explicitly before changing ownership.', 4)
     with lock(runtime_directory(False), 'session.lock', blocking=False):
         with tempfile.TemporaryDirectory(prefix='.install-', dir=BASE) as temporary:
             staged = Path(temporary) / 'Helper.app'
@@ -131,7 +131,7 @@ def install_privileged(uid):
                     if current.get('running') and current.get('compatible'):
                         return {**current, 'authorized_uid': uid, 'hardware_settings_changed': False}
                     time.sleep(.2)
-                raise MacFanError('HELPER_START_FAILED', 'Installed helper did not become ready.')
+                raise AgenticFanError('HELPER_START_FAILED', 'Installed helper did not become ready.')
             except Exception:
                 stop_helper()
                 if APP.exists(): shutil.rmtree(APP)
@@ -147,11 +147,11 @@ def install_privileged(uid):
 
 def uninstall_privileged(uid):
     if os.geteuid() != 0:
-        raise MacFanError('PERMISSION_DENIED', 'Administrator authorization is required.', 4)
+        raise AgenticFanError('PERMISSION_DENIED', 'Administrator authorization is required.', 4)
     if not BASE.exists(): return {'installed': False}
     check_root_path(BASE, directory=True)
     if installed_owner() not in (None, uid):
-        raise MacFanError('HELPER_ACCESS_DENIED', 'Helper belongs to another user.', 4)
+        raise AgenticFanError('HELPER_ACCESS_DENIED', 'Helper belongs to another user.', 4)
     with lock(runtime_directory(False), 'session.lock', blocking=False):
         stop_helper()
         if PLIST.exists():
@@ -171,7 +171,7 @@ def uninstall_privileged(uid):
 
 def manage(action):
     if sys.platform != 'darwin' or not getattr(sys, 'frozen', False):
-        raise invalid('Run helper installation/removal using the installed MacFan.app CLI on macOS.')
+        raise invalid('Run helper installation/removal using the installed AgenticFan.app CLI on macOS.')
     if os.geteuid() == 0:
         raise invalid('Run helper install as your normal user; the system will request authorization once.')
     if action == 'install':
@@ -182,9 +182,9 @@ def manage(action):
     command = [sys.executable, '--internal-helper-' + action, str(os.getuid())]
     result = run('/usr/bin/osascript', '-e', AUTHORIZATION_SCRIPT, *command, check=False)
     if result.returncode:
-        raise MacFanError('HELPER_INSTALL_FAILED', 'System authorization or helper setup failed.', 4,
+        raise AgenticFanError('HELPER_INSTALL_FAILED', 'System authorization or helper setup failed.', 4,
                           diagnostic=result.stderr.strip())
     messages = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
     if not messages or not messages[-1].get('ok'):
-        raise MacFanError('HELPER_INSTALL_FAILED', 'Helper did not confirm setup.', 4)
+        raise AgenticFanError('HELPER_INSTALL_FAILED', 'Helper did not confirm setup.', 4)
     return messages[-1]['data']

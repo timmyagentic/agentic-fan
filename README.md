@@ -1,10 +1,10 @@
-# MacFan — Mac 温度与风扇应用，内置 Agent CLI
+# AgenticFan — Fan control for Mac. Built for agents.
 
-提供温度监测、有限时长调速与可由 Agent 编辑的温度规则。面向 Apple Silicon，交付格式为 **DMG 内的 `MacFan.app`**，内含窗口、CLI 和所需运行时。用户不需要安装 Python，也不需要模型、API Key 或网络服务。
+提供温度监测、有限时长调速与可由 Agent 编辑的温度规则。面向 Apple Silicon，交付格式为 **DMG 内的 `AgenticFan.app`**，内含窗口、CLI 和所需运行时。用户不需要安装 Python，也不需要模型、API Key 或网络服务。
 
 **下一版 0.4.2（尚未发布）：修复原生界面持续监测时的内存增长。** 每轮读取后释放 JSON 临时对象；界面忙时合并待显示的采样，保留控制、错误与恢复回执的顺序。新增保持后台进程存活的 255 测点回放与物理内存回归测试，避免退出进程掩盖泄漏。详见[原生界面内存检查](docs/native-memory.md)和[更新记录](CHANGELOG.zh-Hans.md)。普通更新只升补丁号，协作与合并规则见 [AGENTS.md](AGENTS.md)。
 
-**0.5.0：增加 Agent 可直接编辑的本地温度规则。** 预置 CPU ≥99°C 满速、≤95°C 持续 5 秒恢复自动，默认关闭；同一份 JSON 支持多条规则、最高/固定 RPM、热加载与版本冲突检查，CLI 分别反馈保存、载入、触发和转速确认。详见[温度规则与 Agent 配置](docs/temperature-rules.md)。
+**下一版 0.4.2：增加 Agent 可直接编辑的本地温度规则。** 预置 CPU ≥99°C 满速、≤95°C 持续 5 秒恢复自动，默认关闭；同一份 JSON 支持多条规则、最高/固定 RPM、热加载与版本冲突检查，CLI 分别反馈保存、载入、触发和转速确认。详见[温度规则与 Agent 配置](docs/temperature-rules.md)。
 
 **菜单栏与登录启动。** 应用只在菜单栏驻留，不显示 Dock 图标；首次正常打开默认注册当前用户的登录项，可在设置关闭。启动时不弹出主窗口，通过菜单栏“打开主窗口”访问完整界面。已启用的温度规则会随应用恢复运行；只运行安装器或 CLI 不会注册登录项。
 
@@ -12,22 +12,22 @@
 
 ## 给 Agent 一句话安装
 
-> 帮我安装 https://github.com/timmyagentic/agentic-mac-fans-control ，按照 INSTALL.md 安装 MacFan App、CLI 和 Codex skill，最后检查温度和风扇接口。
+> 帮我安装 https://github.com/timmyagentic/agentic-fan ，按照 INSTALL.md 安装 AgenticFan App、CLI 和 Codex skill，最后检查温度和风扇接口。
 
-Agent 按 [INSTALL.md](INSTALL.md) 下载已构建的 DMG、校验安装包、安装 App、配置 `macfan` 命令和 skill，再运行只读诊断。也支持 Claude Code 或两者同时安装。安装器默认使用 `~/Applications`，不需要 Python 或本地编译。
+Agent 按 [INSTALL.md](INSTALL.md) 下载已构建的 DMG、校验安装包、安装 App、配置 `agenticfan` 命令和 skill，再运行只读诊断。也支持 Claude Code 或两者同时安装。安装器默认使用 `~/Applications`，不需要 Python 或本地编译。
 
 ```sh
 bash scripts/install-macos.sh --agent codex
 ```
 
-该命令需要先取得本仓库，并有可访问仓库的 `gh` 登录；也可以用 `--dmg PATH` 安装已下载的包。当前开发版尚未经过 Apple 公证，系统可能要求用户确认打开。下载安装包的入口见 [macOS DMG 构建记录](https://github.com/timmyagentic/agentic-mac-fans-control/actions/workflows/macos-dmg.yml)。
+该命令需要先取得本仓库，并有可访问仓库的 `gh` 登录；也可以用 `--dmg PATH` 安装已下载的包。当前开发版尚未经过 Apple 公证，系统可能要求用户确认打开。下载安装包的入口见 [macOS DMG 构建记录](https://github.com/timmyagentic/agentic-fan/actions/workflows/macos-dmg.yml)。
 
 ## 安装与运行
 
 DMG 构建目标为 **Apple Silicon、macOS 15+**。取得构建产物后：
 
-1. 打开 `MacFan-<version>-arm64-dev.dmg`，把 `MacFan.app` 拖入 `Applications`。
-2. 双击应用后，点击菜单栏 MacFan 图标查看概览；选择“打开主窗口”查看温度测点、风扇转速和模式。
+1. 打开 `AgenticFan-<version>-arm64-dev.dmg`，把 `AgenticFan.app` 拖入 `Applications`。
+2. 双击应用后，点击菜单栏 AgenticFan 图标查看概览；选择“打开主窗口”查看温度测点、风扇转速和模式。
 3. 选择风扇、目标 RPM 与持续秒数，点击设置；首次控扇时由 macOS 请求管理员授权安装 Helper，后续无需重复授权。也可以点击“全部恢复自动”。
 
 默认 CI 产物是 ad-hoc 签名的开发包，**未经 Apple 公证**，下载后可能被 Gatekeeper 拦截。正式分发需要 Developer ID 签名与公证；构建方法见 [macOS 打包说明](docs/macos-packaging.md)。仓库中的 Python 包仅用于开发，不是面向用户的安装包。
@@ -35,18 +35,18 @@ DMG 构建目标为 **Apple Silicon、macOS 15+**。取得构建产物后：
 应用内置的 CLI 可直接供终端和 Agent 使用，默认输出 JSON，持续监控与控扇会话输出 NDJSON：
 
 ```sh
-"/Applications/MacFan.app/Contents/MacOS/macfan" schema
-"/Applications/MacFan.app/Contents/MacOS/macfan" capabilities
-"/Applications/MacFan.app/Contents/MacOS/macfan" sensors
-"/Applications/MacFan.app/Contents/MacOS/macfan" fans
-"/Applications/MacFan.app/Contents/MacOS/macfan" watch --interval 1 --count 10
+"/Applications/AgenticFan.app/Contents/MacOS/agenticfan" schema
+"/Applications/AgenticFan.app/Contents/MacOS/agenticfan" capabilities
+"/Applications/AgenticFan.app/Contents/MacOS/agenticfan" sensors
+"/Applications/AgenticFan.app/Contents/MacOS/agenticfan" fans
+"/Applications/AgenticFan.app/Contents/MacOS/agenticfan" watch --interval 1 --count 10
 ```
 
-读取不要求管理员权限。首次启用控扇，以普通用户运行 `macfan helper install` 并完成一次系统授权；后续 Agent 直接调用 CLI，无需 `sudo`。升级 Helper 或卸载时可能再次需要授权。先读取 `fans` 返回的每个风扇的 `min_rpm`、`max_rpm` 和当前模式，再选择范围内的正整数 RPM；下面的 3000 只是示例值。
+读取不要求管理员权限。首次启用控扇，以普通用户运行 `agenticfan helper install` 并完成一次系统授权；后续 Agent 直接调用 CLI，无需 `sudo`。升级 Helper 或卸载时可能再次需要授权。先读取 `fans` 返回的每个风扇的 `min_rpm`、`max_rpm` 和当前模式，再选择范围内的正整数 RPM；下面的 3000 只是示例值。
 
 ```sh
-"/Applications/MacFan.app/Contents/MacOS/macfan" fans set --fan 0 --rpm 3000 --duration 30
-"/Applications/MacFan.app/Contents/MacOS/macfan" fans auto --fan all
+"/Applications/AgenticFan.app/Contents/MacOS/agenticfan" fans set --fan 0 --rpm 3000 --duration 30
+"/Applications/AgenticFan.app/Contents/MacOS/agenticfan" fans auto --fan all
 ```
 
 `fans set` 是**前台、有期限的会话**，不是永久设置。最多 3600 秒，必须明确指定 `--duration`。它依次输出目标已写入、实际 RPM 已达到容差、自动模式已恢复等事件。Ctrl-C 可以提前结束。另一终端运行 `fans auto` 也能结束相应控制。重复 `--fan` 可同时控制多个风扇，或使用 `--fan all`；所有选中风扇的范围会在第一次写入前检查。
@@ -54,20 +54,20 @@ DMG 构建目标为 **Apple Silicon、macOS 15+**。取得构建产物后：
 ## 无硬件演示
 
 ```sh
-"/Applications/MacFan.app/Contents/MacOS/macfan" --gui --demo
-"/Applications/MacFan.app/Contents/MacOS/macfan" --demo snapshot
+"/Applications/AgenticFan.app/Contents/MacOS/agenticfan" --gui --demo
+"/Applications/AgenticFan.app/Contents/MacOS/agenticfan" --demo snapshot
 ```
 
 在源码目录开发时，Python 3.10+ 可运行相同核心逻辑；Linux 也支持显式的 `--demo` 模拟模式：
 
 ```sh
-python3 -m macfan --demo snapshot
-python3 -m macfan --demo watch --interval 1 --count 3
-python3 -m macfan --demo fans set --fan all --rpm 3000 --duration 3
-python3 -m macfan --demo fans
+python3 -m agenticfan --demo snapshot
+python3 -m agenticfan --demo watch --interval 1 --count 3
+python3 -m agenticfan --demo fans set --fan all --rpm 3000 --duration 3
+python3 -m agenticfan --demo fans
 ```
 
-全局选项 `--demo` 必须放在命令前。模拟输出总是含 `"simulated": true`，绝不因原生访问失败而自动回退。模拟状态保存在当前用户私有临时目录；测试可用 `MACFAN_DEMO_DIR` 指定独立目录。这一变量不影响真实硬件的运行目录。
+全局选项 `--demo` 必须放在命令前。模拟输出总是含 `"simulated": true`，绝不因原生访问失败而自动回退。模拟状态保存在当前用户私有临时目录；测试可用 `AGENTICFAN_DEMO_DIR` 指定独立目录。这一变量不影响真实硬件的运行目录。
 
 ## Agent 接口
 
@@ -91,7 +91,7 @@ python3 -m macfan --demo fans
 
 Agent 建议流程与流式消费示例见 [docs/agent-interface.md](docs/agent-interface.md)。应用的“AI native”体现在可发现、可组合、带明确权限和生命周期的接口；这个 MVP 不包含聊天界面或自主温控模型。
 
-可安装的 [macfan skill](macfan/agent_skill/SKILL.md) 将发现命令、诊断、监控、有限控扇和恢复自动模式连成 Agent 工作流程。它随 App 一起打包；安装器将它放入所选 Agent 的用户 skill 目录。
+可安装的 [agenticfan skill](agenticfan/agent_skill/SKILL.md) 将发现命令、诊断、监控、有限控扇和恢复自动模式连成 Agent 工作流程。它随 App 一起打包；安装器将它放入所选 Agent 的用户 skill 目录。
 
 ## 原生能力与边界
 
@@ -105,7 +105,7 @@ Agent 建议流程与流式消费示例见 [docs/agent-interface.md](docs/agent-
 部分新机型可能需要全局 `Ftst` 路径。只有明确指定 `--experimental-ftst` 才会写入它；它要求所有风扇原先处于自动模式且 `Ftst` 为零。该路径未经真机验证，不能当作通用兼容承诺。恢复时仅在所有风扇都处于自动模式后清除它。若常规 `fans auto` 检测到它仍非零，会报告恢复未完成；显式恢复的形式为：
 
 ```sh
-"/Applications/MacFan.app/Contents/MacOS/macfan" fans auto --fan all --experimental-ftst
+"/Applications/AgenticFan.app/Contents/MacOS/agenticfan" fans auto --fan all --experimental-ftst
 ```
 
 ## 控制生命周期
@@ -116,7 +116,7 @@ SMC 模式和目标值可能异步生效；每步最多等待 3 秒读回，超�
 
 锁只协调本工具，不协调其他风扇应用；验收与使用时应避免多个控制程序同时运行。杀死独立控制进程、内核调用永久阻塞、系统崩溃、固件行为或其他控制程序竞争，都可能妨碍恢复。Helper 由 launchd 管理；仍没有睡眠前通知处理；检测到恢复运行后的采样间隔异常会结束会话。不要把它当作硬件热保护机制。
 
-真实写入的运行锁在 root 私有的 `/var/run/macfan`。Helper 文件为 root 所有，socket 仅对安装时授权的本机 UID 开放，并通过内核凭据复核调用者。接口仅包含状态、有限控扇和恢复，不接受命令、程序路径或任意 SMC 键；不配置免密 sudo，不访问网络。详情见 [Helper 与权限边界](docs/helper.md)。
+真实写入的运行锁在 root 私有的 `/var/run/agenticfan`。Helper 文件为 root 所有，socket 仅对安装时授权的本机 UID 开放，并通过内核凭据复核调用者。接口仅包含状态、有限控扇和恢复，不接受命令、程序路径或任意 SMC 键；不配置免密 sudo，不访问网络。详情见 [Helper 与权限边界](docs/helper.md)。
 
 关闭主窗口后，控扇会话继续在菜单栏运行。正常退出应用时，如有本应用发起且尚未确认恢复的控扇会话，会先要求恢复自动模式。GUI 首次安装 Helper 后启动普通权限 CLI；强制结束整个应用时，已有会话仍可能运行至指定时限。期限与恢复逻辑由独立控扇进程执行。
 
@@ -127,9 +127,9 @@ python3 -m venv .venv
 .venv/bin/python -m pip install .
 python3 -m unittest discover -v
 python3 packaging/macos/build_native.py
-python3 -m macfan --gui --demo
+python3 -m agenticfan --gui --demo
 ```
 
-窗口开发需要 macOS 15+ 和 Xcode Command Line Tools。先运行 `python3 packaging/macos/build_native.py`，再运行 `python3 -m macfan --gui`；`--demo` 显式使用模拟数据。SwiftUI/AppKit 界面位于 `native/`，通过原有 JSON CLI 监测和控制，不直接写 SMC。CLI 在不加载任何 UI 的情况下独立工作。
+窗口开发需要 macOS 15+ 和 Xcode Command Line Tools。先运行 `python3 packaging/macos/build_native.py`，再运行 `python3 -m agenticfan --gui`；`--demo` 显式使用模拟数据。SwiftUI/AppKit 界面位于 `native/`，通过原有 JSON CLI 监测和控制，不直接写 SMC。CLI 在不加载任何 UI 的情况下独立工作。
 
 测试覆盖实际 CLI 子进程、读取协议、混合类型解码、部分写入失败、实际 RPM 未响应、并发控制、过期恢复以及父进程 SIGTERM/SIGKILL 后的恢复。DMG 流程另外检查独立运行时、窗口演示启动、应用签名与挂载后运行。硬件测试结果应单独记录；CI 的 macOS 虚拟机也不能代表真实 Mac SMC。

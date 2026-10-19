@@ -67,7 +67,7 @@ final class LoginItemSettings: ObservableObject {
         case .enabled: return "已开启：登录后只在菜单栏运行。"
         case .notRegistered: return "已关闭登录时自动启动。"
         case .requiresApproval: return "登录项已被系统关闭，请在系统设置中允许。"
-        case .notFound: return "macOS 未找到登录项，请从已安装的 MacFan.app 启动。"
+        case .notFound: return "macOS 未找到登录项，请从已安装的 AgenticFan.app 启动。"
         }
     }
 

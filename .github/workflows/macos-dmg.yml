@@ -5,7 +5,7 @@ on:
   push:
     branches: ['codex/apple-silicon-dmg']
     paths:
-      - 'macfan/**'
+      - 'agenticfan/**'
       - 'native/**'
       - 'packaging/macos/**'
       - 'pyproject.toml'
@@ -18,7 +18,7 @@ on:
     branches: ['codex/apple-silicon-dmg']
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'macfan/**'
+      - 'agenticfan/**'
       - 'native/**'
       - 'packaging/macos/**'
       - 'pyproject.toml'
@@ -58,6 +58,6 @@ jobs:
         run: python packaging/macos/test_install.py --dmg dist/macos/*.dmg
       - uses: actions/upload-artifact@v4
         with:
-          name: MacFan-Apple-Silicon-development-DMG
+          name: AgenticFan-Apple-Silicon-development-DMG
           path: dist/macos/*
           if-no-files-found: error
