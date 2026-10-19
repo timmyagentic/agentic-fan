@@ -1,9 +1,9 @@
 #!/bin/bash
-# Install a verified MacFan DMG and its Agent integration. No Python required.
+# Install a verified AgenticFan DMG and its Agent integration. No Python required.
 set -euo pipefail
 
-repository="timmyagentic/agentic-mac-fans-control"
-artifact="MacFan-Apple-Silicon-development-DMG"
+repository="timmyagentic/agentic-fan"
+artifact="AgenticFan-Apple-Silicon-development-DMG"
 agent="codex"
 user_root="$HOME"
 run_id=""
@@ -12,7 +12,7 @@ work=""
 stage=""
 mounted=0
 
-fail() { printf 'MacFan: %s\n' "$*" >&2; exit 1; }
+fail() { printf 'AgenticFan: %s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'USAGE'
 Usage: bash scripts/install-macos.sh [options]
@@ -22,9 +22,9 @@ Usage: bash scripts/install-macos.sh [options]
   --user-root PATH          User directory (default: current home)
   --help                    Show this help
 
-Installs ~/Applications/MacFan.app, ~/.local/bin/macfan, and the Agent skill.
+Installs ~/Applications/AgenticFan.app, ~/.local/bin/agenticfan, and the Agent skill.
 Adds a managed PATH block to .zprofile and .bash_profile, backing up originals.
-Without --dmg, requires gh with access to timmyagentic/agentic-mac-fans-control.
+Without --dmg, requires gh with access to timmyagentic/agentic-fan.
 Never changes fan settings, Gatekeeper configuration, or sudo permissions.
 USAGE
 }
@@ -57,7 +57,7 @@ case "$user_root" in /*) ;; *) fail '--user-root must be an absolute path' ;; es
 cleanup() {
   if [ "$mounted" -eq 1 ]; then
     if ! /usr/bin/hdiutil detach "$work/mount" >&2; then
-      printf 'MacFan: disk image could not be detached; retained temporary directory %s\n' "$work" >&2
+      printf 'AgenticFan: disk image could not be detached; retained temporary directory %s\n' "$work" >&2
       return
     fi
   fi
@@ -67,7 +67,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-work="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/macfan-install.XXXXXXXX")"
+work="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/agenticfan-install.XXXXXXXX")"
 
 if [ -z "$dmg" ]; then
   command -v gh >/dev/null || fail 'GitHub CLI is needed to download this private-repository artifact. Install gh, or use --dmg with an already downloaded package.'
@@ -81,11 +81,11 @@ if [ -z "$dmg" ]; then
     --jq '[.conclusion, .head_repository.full_name, .path, .event] | @tsv')"
   IFS=$'\t' read -r conclusion source_repo workflow event <<< "$run_info"
   [ "$conclusion" = success ] && [ "$source_repo" = "$repository" ] && \
-    [ "$workflow" = .github/workflows/macos-dmg.yml ] || fail 'The selected run is not a successful MacFan DMG build'
+    [ "$workflow" = .github/workflows/macos-dmg.yml ] || fail 'The selected run is not a successful AgenticFan DMG build'
   case "$event" in push|workflow_dispatch) ;; *) fail 'Only repository push or manual builds are installable' ;; esac
   gh run download "$run_id" --repo "$repository" --name "$artifact" --dir "$work/package"
   shopt -s nullglob
-  images=("$work/package"/MacFan-*-arm64*.dmg)
+  images=("$work/package"/AgenticFan-*-arm64*.dmg)
   [ "${#images[@]}" -eq 1 ] || fail 'Expected exactly one Apple Silicon DMG in the artifact'
   dmg="${images[0]}"
 fi
@@ -100,22 +100,22 @@ actual="$(/usr/bin/shasum -a 256 "$dmg")"
 /bin/mkdir "$work/mount"
 /usr/bin/hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$work/mount" >&2
 mounted=1
-source_app="$work/mount/MacFan.app"
-[ -d "$source_app" ] || fail 'The DMG does not contain MacFan.app'
+source_app="$work/mount/AgenticFan.app"
+[ -d "$source_app" ] || fail 'The DMG does not contain AgenticFan.app'
 identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$source_app/Contents/Info.plist")"
-[ "$identifier" = io.github.timmyagentic.macfan ] || fail 'Unexpected app bundle identifier'
+[ "$identifier" = io.github.timmyagentic.agenticfan ] || fail 'Unexpected app bundle identifier'
 /usr/bin/codesign --verify --deep --strict "$source_app" >&2
 if ! /usr/sbin/spctl --assess --type execute "$source_app" >&2; then
-  printf 'MacFan: this development app is not Gatekeeper-approved. System security settings are unchanged; macOS may require user approval before launch.\n' >&2
+  printf 'AgenticFan: this development app is not Gatekeeper-approved. System security settings are unchanged; macOS may require user approval before launch.\n' >&2
 fi
 
 app_parent="$user_root/Applications"
-destination="$app_parent/MacFan.app"
+destination="$app_parent/AgenticFan.app"
 /bin/mkdir -p "$app_parent"
-[ ! -L "$destination" ] || fail 'Existing MacFan.app is a symlink; it was not replaced'
+[ ! -L "$destination" ] || fail 'Existing AgenticFan.app is a symlink; it was not replaced'
 same=0
 if [ -e "$destination" ]; then
-  [ -d "$destination" ] || fail 'Existing MacFan.app is not an application directory'
+  [ -d "$destination" ] || fail 'Existing AgenticFan.app is not an application directory'
   existing_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$destination/Contents/Info.plist")"
   [ "$existing_id" = "$identifier" ] || fail 'Existing application has a different identifier; it was not replaced'
   if /usr/bin/codesign --verify --deep --strict "$destination" 2>/dev/null; then
@@ -125,18 +125,18 @@ if [ -e "$destination" ]; then
   fi
 fi
 if [ "$same" -eq 0 ]; then
-  stage="$(/usr/bin/mktemp -d "$app_parent/.macfan-stage.XXXXXXXX")"
-  /usr/bin/ditto "$source_app" "$stage/MacFan.app"
-  /usr/bin/codesign --verify --deep --strict "$stage/MacFan.app" >&2
+  stage="$(/usr/bin/mktemp -d "$app_parent/.agenticfan-stage.XXXXXXXX")"
+  /usr/bin/ditto "$source_app" "$stage/AgenticFan.app"
+  /usr/bin/codesign --verify --deep --strict "$stage/AgenticFan.app" >&2
   if [ -e "$destination" ]; then
-    backup="$app_parent/MacFan.previous.$(/bin/date +%Y%m%d%H%M%S)-$$.app"
+    backup="$app_parent/AgenticFan.previous.$(/bin/date +%Y%m%d%H%M%S)-$$.app"
     /bin/mv "$destination" "$backup"
-    printf 'MacFan: previous application retained at %s\n' "$backup" >&2
+    printf 'AgenticFan: previous application retained at %s\n' "$backup" >&2
   fi
-  /bin/mv "$stage/MacFan.app" "$destination"
+  /bin/mv "$stage/AgenticFan.app" "$destination"
 fi
-executable="$destination/Contents/MacOS/macfan"
+executable="$destination/Contents/MacOS/agenticfan"
 "$executable" schema >/dev/null
 "$executable" agent install --target "$agent" --user-root "$user_root"
 "$executable" doctor
-printf 'MacFan: app, CLI, and Agent skill installed. Use %s now; new login shells can use macfan. Reload your Agent skills if needed.\n' "$user_root/.local/bin/macfan" >&2
+printf 'AgenticFan: app, CLI, and Agent skill installed. Use %s now; new login shells can use agenticfan. Reload your Agent skills if needed.\n' "$user_root/.local/bin/agenticfan" >&2

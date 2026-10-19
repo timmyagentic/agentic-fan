@@ -1,6 +1,6 @@
 # 温度有效性与 0.2.0 修复
 
-此次修复依据用户的安装和只读排查反馈，不代表完整代码审计或任何机型已经通过控扇验收。用户观察到 IOHID `PMU tdev4`、`PMU tdev5` 返回约 −9200°C，系统事件描述也包含这些数值。现有证据支持“异常已存在于系统接口”，不能断言 MacFan 解码出错，也不能确定传感器未接入或驱动/固件故障。
+此次修复依据用户的安装和只读排查反馈，不代表完整代码审计或任何机型已经通过控扇验收。用户观察到 IOHID `PMU tdev4`、`PMU tdev5` 返回约 −9200°C，系统事件描述也包含这些数值。现有证据支持“异常已存在于系统接口”，不能断言 AgenticFan 解码出错，也不能确定传感器未接入或驱动/固件故障。
 
 0.1.0 仅检查有限数和零值，导致不合理数值进入 `ok` 与 `valid_sensor_count`；0.2.0 在 SMC 和 IOHID 共用的验证层修复这一问题，原有按键类型解码保留。
 
@@ -26,12 +26,12 @@
 
 ## 升级后只读复查
 
-按 [INSTALL.md](../INSTALL.md) 更新 App、CLI 和随包 skill。确认 `macfan --version` 为当前版本，`macfan schema` 的协议版本为 2，再运行：
+按 [INSTALL.md](../INSTALL.md) 更新 App、CLI 和随包 skill。确认 `agenticfan --version` 为当前版本，`agenticfan schema` 的协议版本为 2，再运行：
 
 ```sh
-macfan doctor
-macfan sensors --source iohid
-macfan watch --interval 1 --count 10
+agenticfan doctor
+agenticfan sensors --source iohid
+agenticfan watch --interval 1 --count 10
 ```
 
 检查异常值是否出现在 `raw_value`、可用值是否为 `null`、告警是否列出对应 ID，以及统计和界面是否一致。机器状态可能变化，不要求每次都恰好 255 个测点或相同零值数量。以上操作不写入风扇。

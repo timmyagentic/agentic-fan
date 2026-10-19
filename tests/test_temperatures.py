@@ -7,15 +7,15 @@ import struct
 import unittest
 from unittest.mock import Mock, patch
 
-from macfan import cli
-from macfan.codecs import KeyInfo
-from macfan.demo import MemorySMC, fixture
-from macfan.doctor import diagnose
-from macfan.errors import MacFanError
-from macfan.gui import sensor_cells
-from macfan.hardware import Hardware
-from macfan.hid import HIDTemperatures
-from macfan.protocol import success
+from agenticfan import cli
+from agenticfan.codecs import KeyInfo
+from agenticfan.demo import MemorySMC, fixture
+from agenticfan.doctor import diagnose
+from agenticfan.errors import AgenticFanError
+from agenticfan.gui import sensor_cells
+from agenticfan.hardware import Hardware
+from agenticfan.hid import HIDTemperatures
+from agenticfan.protocol import success
 
 
 def fake_hid(observations):
@@ -77,7 +77,7 @@ class TemperatureTests(unittest.TestCase):
     def test_reported_255_sensor_snapshot_has_honest_counts_and_evidence(self):
         hw = reported_hardware()
         data = cli.snapshot(hw)
-        with patch("macfan.hardware.native_hardware", return_value=hw):
+        with patch("agenticfan.hardware.native_hardware", return_value=hw):
             report = diagnose()
         summary = data["sensor_summary"]
         self.assertEqual(summary, report["sensor_summary"])
@@ -108,7 +108,7 @@ class TemperatureTests(unittest.TestCase):
 
     def test_successful_interface_with_no_usable_temperatures_is_not_available(self):
         hw = hardware([("bad", -9200), ("zero", 0)])
-        with patch("macfan.hardware.native_hardware", return_value=hw):
+        with patch("agenticfan.hardware.native_hardware", return_value=hw):
             report = diagnose()
         self.assertTrue(report["temperature_interface_available"])
         self.assertFalse(report["monitoring_available"])
@@ -119,7 +119,7 @@ class TemperatureTests(unittest.TestCase):
 
     def test_missing_event_is_distinct_from_zero_and_invalid(self):
         hw = hardware([("missing", None)])
-        with patch("macfan.hardware.native_hardware", return_value=hw):
+        with patch("agenticfan.hardware.native_hardware", return_value=hw):
             report = diagnose()
         self.assertFalse(report["temperature_interface_available"])
         self.assertEqual(report["data_quality"], "unavailable")
@@ -157,8 +157,8 @@ class TemperatureTests(unittest.TestCase):
 
     def test_doctor_preserves_temperatures_when_fan_discovery_fails(self):
         hw = hardware(smc_temperatures=[("TCMz", 45)])
-        with patch("macfan.hardware.native_hardware", return_value=hw), \
-                patch.object(hw, "fans", side_effect=MacFanError("SMC_IO_ERROR", "fan read failed")):
+        with patch("agenticfan.hardware.native_hardware", return_value=hw), \
+                patch.object(hw, "fans", side_effect=AgenticFanError("SMC_IO_ERROR", "fan read failed")):
             report = diagnose()
         self.assertEqual(report["valid_sensor_count"], 1)
         self.assertTrue(report["monitoring_available"])
@@ -168,8 +168,8 @@ class TemperatureTests(unittest.TestCase):
 
     def test_doctor_still_discovers_fans_when_temperature_discovery_fails(self):
         hw = hardware()
-        with patch("macfan.hardware.native_hardware", return_value=hw), \
-                patch.object(hw, "temperatures", side_effect=MacFanError("SMC_IO_ERROR", "sensor enumeration failed")):
+        with patch("agenticfan.hardware.native_hardware", return_value=hw), \
+                patch.object(hw, "temperatures", side_effect=AgenticFanError("SMC_IO_ERROR", "sensor enumeration failed")):
             report = diagnose()
         self.assertTrue(report["control_interface_available"])
         self.assertEqual(report["fan_count"], 2)
@@ -180,7 +180,7 @@ class TemperatureTests(unittest.TestCase):
     def test_fanless_mac_and_all_plausible_readings_can_be_available(self):
         hw = hardware(smc_temperatures=[("TCMz", 45)])
         hw.smc.values["FNum"] = (KeyInfo("ui8 ", 1), b"\0")
-        with patch("macfan.hardware.native_hardware", return_value=hw):
+        with patch("agenticfan.hardware.native_hardware", return_value=hw):
             report = diagnose()
         self.assertEqual(report["status"], "available")
         self.assertEqual(report["warnings"], [])
@@ -190,7 +190,7 @@ class TemperatureTests(unittest.TestCase):
     def test_source_warning_prevents_an_all_clear_diagnosis(self):
         hw = hardware(smc_temperatures=[("TCMz", 45)])
         hw.warnings = [{"code": "HID_UNAVAILABLE", "message": "IOHID cannot be opened"}]
-        with patch("macfan.hardware.native_hardware", return_value=hw):
+        with patch("agenticfan.hardware.native_hardware", return_value=hw):
             report = diagnose()
         self.assertEqual(report["status"], "limited")
         self.assertEqual(report["data_quality"], "complete")
@@ -200,8 +200,8 @@ class TemperatureTests(unittest.TestCase):
         for arguments in (["sensors"], ["snapshot"], ["watch", "--count", "2", "--interval", "0.2"],
                           ["capabilities"], ["doctor"], ["sensors", "--source", "smc"]):
             with self.subTest(arguments=arguments), \
-                    patch("macfan.cli.native_hardware", return_value=reported_hardware()), \
-                    patch("macfan.hardware.native_hardware", return_value=reported_hardware()), \
+                    patch("agenticfan.cli.native_hardware", return_value=reported_hardware()), \
+                    patch("agenticfan.hardware.native_hardware", return_value=reported_hardware()), \
                     contextlib.redirect_stdout(io.StringIO()) as output:
                 self.assertEqual(cli.main(arguments), 0)
                 messages = [json.loads(line) for line in output.getvalue().splitlines()]

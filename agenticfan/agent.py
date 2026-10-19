@@ -9,16 +9,16 @@ import shlex
 import tempfile
 
 from . import __version__
-from .errors import MacFanError, invalid
+from .errors import AgenticFanError, invalid
 
 SKILL = Path(__file__).with_name("agent_skill") / "SKILL.md"
-START = "# >>> macfan PATH >>>"
-END = "# <<< macfan PATH <<<"
+START = "# >>> agenticfan PATH >>>"
+END = "# <<< agenticfan PATH <<<"
 
 
 def atomic_write(path: Path, content: bytes):
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=".macfan-", dir=path.parent)
+    fd, temporary = tempfile.mkstemp(prefix=".agenticfan-", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as output:
             output.write(content)
@@ -34,14 +34,14 @@ def skill_directories(user_root: Path, target: str):
         raise invalid("Choose codex, claude, or both.")
     folders = []
     if target in ("codex", "both"):
-        folders.append(user_root / ".agents/skills/macfan")
+        folders.append(user_root / ".agents/skills/agenticfan")
     if target in ("claude", "both"):
-        folders.append(user_root / ".claude/skills/macfan")
+        folders.append(user_root / ".claude/skills/agenticfan")
     return folders
 
 
 def conflict(path):
-    return MacFanError("INSTALL_CONFLICT", "An existing file is not managed by MacFan; it was not overwritten.",
+    return AgenticFanError("INSTALL_CONFLICT", "An existing file is not managed by AgenticFan; it was not overwritten.",
                        6, path=str(path))
 
 
@@ -51,11 +51,11 @@ def integrate(executable: Path, user_root: Path, target="codex") -> dict:
     if not os.access(executable, os.X_OK):
         raise invalid("The bundled CLI is not executable.", path=str(executable))
     user_root = user_root.expanduser().resolve()
-    binary = user_root / ".local/bin/macfan"
+    binary = user_root / ".local/bin/agenticfan"
     skill = SKILL.read_bytes()
     digest = hashlib.sha256(skill).hexdigest()
     destinations = skill_directories(user_root, target)
-    receipt = json.dumps({"managed_by": "macfan", "version": __version__, "executable": str(executable),
+    receipt = json.dumps({"managed_by": "agenticfan", "version": __version__, "executable": str(executable),
                           "skill_sha256": digest}, indent=2).encode() + b"\n"
     writes = []
     profiles = []
@@ -82,7 +82,7 @@ def integrate(executable: Path, user_root: Path, target="codex") -> dict:
             except (OSError, ValueError, KeyError):
                 unchanged = False
                 record = {}
-            if record.get("managed_by") != "macfan" or not unchanged:
+            if record.get("managed_by") != "agenticfan" or not unchanged:
                 raise conflict(directory)
         writes.extend(((directory / "SKILL.md", skill), (directory / "installation.json", receipt)))
 
@@ -98,7 +98,7 @@ def integrate(executable: Path, user_root: Path, target="codex") -> dict:
             if block not in text or text.count(START) != 1 or text.count(END) != 1:
                 raise conflict(profile)
             continue
-        backup = profile.with_name(name + ".before-macfan")
+        backup = profile.with_name(name + ".before-agenticfan")
         if profile.exists() and not backup.exists():
             if backup.is_symlink():
                 raise conflict(backup)

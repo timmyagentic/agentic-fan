@@ -16,7 +16,7 @@ def build(output):
     subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-O', '-target', 'arm64-apple-macos15.0',
                     str(ROOT / 'native/Models.swift'), str(ROOT / 'native/Command.swift'),
                     str(ROOT / 'native/MenuPopover.swift'), str(ROOT / 'native/LoginItem.swift'),
-                    str(ROOT / 'native/MacFanUI.swift'),
+                    str(ROOT / 'native/AgenticFanUI.swift'),
                     '-framework', 'SwiftUI', '-framework', 'AppKit', '-framework', 'ServiceManagement',
                     '-o', str(output)], check=True)
     return output
@@ -24,5 +24,5 @@ def build(output):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT / 'build/native/MacFanUI')
+    parser.add_argument('--output', type=Path, default=ROOT / 'build/native/AgenticFanUI')
     print(build(parser.parse_args().output))

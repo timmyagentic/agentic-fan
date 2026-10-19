@@ -6,7 +6,7 @@ import platform
 import sys
 
 from . import __version__
-from .errors import MacFanError
+from .errors import AgenticFanError
 from .temperatures import sensor_report
 
 
@@ -34,16 +34,16 @@ def diagnose(demo=False):
         try:
             sensors = hw.temperatures()
             report["errors"].extend(row["error"] for row in sensors if "error" in row)
-        except (MacFanError, OSError) as exc:
+        except (AgenticFanError, OSError) as exc:
             report["errors"].append(_error(exc))
         try:
             fans = hw.fans()
             report.update(fan_count=len(fans), control_interface_available=any(row["control_available"] for row in fans))
             report["errors"].extend(error for row in fans for error in row["errors"])
-        except (MacFanError, OSError) as exc:
+        except (AgenticFanError, OSError) as exc:
             report["errors"].append(_error(exc))
         report["warnings"] = list(hw.warnings)
-    except MacFanError as exc:
+    except AgenticFanError as exc:
         report["errors"].append(exc.as_dict())
     except OSError as exc:
         report["errors"].append({"code": "IO_ERROR", "message": str(exc), "details": {}})
@@ -64,4 +64,4 @@ def diagnose(demo=False):
 
 
 def _error(exc):
-    return exc.as_dict() if isinstance(exc, MacFanError) else {"code": "IO_ERROR", "message": str(exc), "details": {}}
+    return exc.as_dict() if isinstance(exc, AgenticFanError) else {"code": "IO_ERROR", "message": str(exc), "details": {}}

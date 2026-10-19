@@ -8,8 +8,8 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from macfan import __version__, helper
-from macfan.errors import MacFanError
+from agenticfan import __version__, helper
+from agenticfan.errors import AgenticFanError
 
 
 def request(operation='set', **changes):
@@ -29,7 +29,7 @@ class HelperProtocolTests(unittest.TestCase):
                       {'duration': float('nan')}, {'duration': 3601}, {'rpm': True},
                       {'lease_seconds': True}, {'lease_seconds': 0}, {'lease_seconds': 11}, {'lease_seconds': float('nan')},
                       {'rpm': 0}, {'experimental_ftst': 1}, {'operation': 'exec'}):
-            with self.subTest(extra=extra), self.assertRaises(MacFanError):
+            with self.subTest(extra=extra), self.assertRaises(AgenticFanError):
                 helper.validate_request(request(**extra))
 
     def test_rules_lease_is_bounded_and_optional(self):
@@ -37,7 +37,7 @@ class HelperProtocolTests(unittest.TestCase):
         helper.validate_request(request())
 
     def test_version_mismatch_rejected_before_hardware(self):
-        with self.assertRaises(MacFanError) as error:
+        with self.assertRaises(AgenticFanError) as error:
             helper.validate_request(request(version='0.0.0'))
         self.assertEqual(error.exception.code, 'HELPER_VERSION_MISMATCH')
         helper.validate_request(request('status', version='0.0.0'))
@@ -46,15 +46,15 @@ class HelperProtocolTests(unittest.TestCase):
         client, server = socket.socketpair()
         self.addCleanup(client.close); self.addCleanup(server.close)
         self.assertEqual(helper.peer_uid(server), os.geteuid())
-        with patch('macfan.helper.peer_uid', return_value=9999):
-            with self.assertRaises(MacFanError) as error:
+        with patch('agenticfan.helper.peer_uid', return_value=9999):
+            with self.assertRaises(AgenticFanError) as error:
                 helper.authorize(server, 501)
             self.assertEqual(error.exception.code, 'HELPER_ACCESS_DENIED')
 
     def test_handler_denies_other_user_before_spawning(self):
         client, server = socket.socketpair()
         self.addCleanup(client.close)
-        with patch('macfan.helper.peer_uid', return_value=9999), patch('macfan.helper.relay') as relay:
+        with patch('agenticfan.helper.peer_uid', return_value=9999), patch('agenticfan.helper.relay') as relay:
             helper.handle(server, 501, threading.Event())
         message = json.loads(client.makefile('r').readline())
         self.assertFalse(message['ok'])
@@ -64,16 +64,16 @@ class HelperProtocolTests(unittest.TestCase):
         client, server = socket.socketpair()
         self.addCleanup(client.close); self.addCleanup(server.close)
         client.sendall(b'x' * (helper.MAX_MESSAGE + 2) + b'\n')
-        with self.assertRaises(MacFanError): helper.read_request(server)
+        with self.assertRaises(AgenticFanError): helper.read_request(server)
 
     def test_worker_uses_only_installed_executable_and_fixed_arguments(self):
         self.assertEqual(helper.worker_command(request()), [str(helper.EXECUTABLE), '--internal-guardian'])
         self.assertEqual(helper.worker_command(request('auto')), [str(helper.EXECUTABLE), 'fans', 'auto', '--fan', '0'])
 
     def test_missing_helper_never_falls_back_to_sudo(self):
-        with tempfile.TemporaryDirectory() as tmp, patch('macfan.helper.SOCKET_DIRECTORY', Path(tmp) / 'absent'), \
-                patch('macfan.helper.subprocess.Popen') as popen:
-            with self.assertRaises(MacFanError) as error:
+        with tempfile.TemporaryDirectory() as tmp, patch('agenticfan.helper.SOCKET_DIRECTORY', Path(tmp) / 'absent'), \
+                patch('agenticfan.helper.subprocess.Popen') as popen:
+            with self.assertRaises(AgenticFanError) as error:
                 helper.request('set', fans=[0], rpm=3000, duration=1, experimental_ftst=False)
             self.assertEqual(error.exception.code, 'HELPER_NOT_INSTALLED')
             popen.assert_not_called()
@@ -86,10 +86,10 @@ class HelperRelayTests(unittest.TestCase):
             directory = Path(tmp)
             client, server = socket.socketpair()
             script = '''import json,sys
-from macfan.guardian import run_session
-from macfan.demo import demo_hardware
-from macfan.runtime import runtime_directory
-from macfan.protocol import emit
+from agenticfan.guardian import run_session
+from agenticfan.demo import demo_hardware
+from agenticfan.runtime import runtime_directory
+from agenticfan.protocol import emit
 import select,os
 config=json.loads(sys.stdin.readline())
 def stopped(t):
@@ -105,7 +105,7 @@ run_session(demo_hardware(),runtime_directory(True),config['fans'],config['rpm']
                 try:
                     helper.relay(server, request(duration=30), threading.Event(),
                                  command=[sys.executable, '-c', script],
-                                 env=dict(os.environ, PYTHONPATH=root, MACFAN_DEMO_DIR=tmp))
+                                 env=dict(os.environ, PYTHONPATH=root, AGENTICFAN_DEMO_DIR=tmp))
                 except (BrokenPipeError, ConnectionResetError): pass
                 except Exception as exc: errors.append(exc)
                 finally: server.close()
@@ -139,24 +139,24 @@ run_session(demo_hardware(),runtime_directory(True),config['fans'],config['rpm']
 
 class HelperInstallTests(unittest.TestCase):
     def test_bundle_rejects_external_symlink_before_chown(self):
-        from macfan.helper_install import secure_bundle
-        with tempfile.TemporaryDirectory() as tmp, patch('macfan.helper_install.os.chown') as chown:
+        from agenticfan.helper_install import secure_bundle
+        with tempfile.TemporaryDirectory() as tmp, patch('agenticfan.helper_install.os.chown') as chown:
             bundle = Path(tmp) / 'App'; bundle.mkdir()
             (bundle / 'outside').symlink_to('/etc')
-            with self.assertRaises(MacFanError): secure_bundle(bundle)
+            with self.assertRaises(AgenticFanError): secure_bundle(bundle)
             chown.assert_not_called()
 
     def test_current_helper_install_does_not_prompt(self):
-        from macfan.helper_install import manage
+        from agenticfan.helper_install import manage
         with patch.object(sys, 'frozen', True, create=True), patch.object(sys, 'platform', 'darwin'), \
-                patch('macfan.helper_install.os.geteuid', return_value=501), \
-                patch('macfan.helper.status', return_value={'running': True, 'compatible': True}), \
-                patch('macfan.helper_install.run') as run:
+                patch('agenticfan.helper_install.os.geteuid', return_value=501), \
+                patch('agenticfan.helper.status', return_value={'running': True, 'compatible': True}), \
+                patch('agenticfan.helper_install.run') as run:
             self.assertTrue(manage('install')['running'])
             run.assert_not_called()
 
     def test_launchd_executes_protected_runtime_and_preserves_guardian(self):
-        from macfan.helper_install import launch_config
+        from agenticfan.helper_install import launch_config
         config = launch_config()
         self.assertEqual(config['ProgramArguments'], [str(helper.EXECUTABLE), '--internal-helper'])
         self.assertEqual(config['UserName'], 'root')

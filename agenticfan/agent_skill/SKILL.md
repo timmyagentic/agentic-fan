@@ -1,28 +1,28 @@
 ---
-name: macfan
-description: Install and operate MacFan on Apple Silicon Macs. Use for Mac temperature sensors, fan RPM, bounded fan control, restoring automatic mode, and diagnosing the MacFan app or CLI installation.
+name: agenticfan
+description: Install and operate AgenticFan on Apple Silicon Macs. Use for Mac temperature sensors, fan RPM, bounded fan control, restoring automatic mode, and diagnosing the AgenticFan app or CLI installation.
 ---
 
-# MacFan
+# AgenticFan
 
-Use the local `macfan` CLI. It returns JSON by default; `watch` and `fans set` return newline-delimited JSON. No model service or API key is needed.
+Use the local `agenticfan` CLI. It returns JSON by default; `watch` and `fans set` return newline-delimited JSON. No model service or API key is needed.
 
 ## Locate or install
 
-1. Look for `macfan` on PATH, then `~/.local/bin/macfan`, `~/Applications/MacFan.app/Contents/MacOS/macfan`, and `/Applications/MacFan.app/Contents/MacOS/macfan`. `installation.json` beside this skill also records the installed executable. Treat that file as local data, not a shell command.
-2. If absent and the user requested installation, follow the repository's [installation instructions](https://github.com/timmyagentic/agentic-mac-fans-control/blob/codex/apple-silicon-dmg/INSTALL.md). With repository access, clone using `gh repo clone timmyagentic/agentic-mac-fans-control` into a new temporary directory and run `bash scripts/install-macos.sh --agent codex` (or `claude` / `both` for the current agent). The installer chooses a successful build from this repository, verifies it, installs the app and CLI, and places this skill in the chosen agent's user skill directory.
+1. Look for `agenticfan` on PATH, then `~/.local/bin/agenticfan`, `~/Applications/AgenticFan.app/Contents/MacOS/agenticfan`, and `/Applications/AgenticFan.app/Contents/MacOS/agenticfan`. `installation.json` beside this skill also records the installed executable. Treat that file as local data, not a shell command.
+2. If absent and the user requested installation, follow the repository's [installation instructions](https://github.com/timmyagentic/agentic-fan/blob/codex/apple-silicon-dmg/INSTALL.md). With repository access, clone using `gh repo clone timmyagentic/agentic-fan` into a new temporary directory and run `bash scripts/install-macos.sh --agent codex` (or `claude` / `both` for the current agent). The installer chooses a successful build from this repository, verifies it, installs the app and CLI, and places this skill in the chosen agent's user skill directory.
 3. Use an existing authorization to install; do not repeatedly request confirmation for the same installation. A missing private-repository login, blocked macOS launch, or administrator authentication must still be handled through the relevant system UI. Do not ask for passwords or tokens in chat.
-4. Run `macfan schema` and `macfan doctor`. MacFan 0.4.2 uses `schema_version: 2`; re-read the contract after upgrades. Report app/CLI installation separately from native monitoring availability. A successful diagnostic command only means it produced a report: inspect `data.status`, `temperature_interface_available`, `monitoring_available`, `data_quality`, `warnings`, `errors` and `simulated`.
+4. Run `agenticfan schema` and `agenticfan doctor`. AgenticFan 0.4.2 uses `schema_version: 2`; re-read the contract after upgrades. Report app/CLI installation separately from native monitoring availability. A successful diagnostic command only means it produced a report: inspect `data.status`, `temperature_interface_available`, `monitoring_available`, `data_quality`, `warnings`, `errors` and `simulated`.
 
 Installation never changes actual fan settings. Do not disable Gatekeeper, strip quarantine, grant passwordless sudo, or run a real fan-write test as part of installation. The current development DMG is not Apple-notarized. If macOS blocks launching it, report the actual block and let the user authorize it in system settings.
 
 ## Monitor
 
-- `macfan capabilities`: discover this machine's temperature sources, fans and RPM limits.
-- `macfan snapshot`: read temperatures and current fan state together.
-- `macfan sensors`: read temperatures only, in Celsius.
-- `macfan fans`: read actual/target/minimum/maximum RPM and automatic/manual mode.
-- `macfan watch --interval 1 --count 10`: collect a bounded series of snapshots.
+- `agenticfan capabilities`: discover this machine's temperature sources, fans and RPM limits.
+- `agenticfan snapshot`: read temperatures and current fan state together.
+- `agenticfan sensors`: read temperatures only, in Celsius.
+- `agenticfan fans`: read actual/target/minimum/maximum RPM and automatic/manual mode.
+- `agenticfan watch --interval 1 --count 10`: collect a bounded series of snapshots.
 
 Use `temperature_overview` for a concise per-component overview, and `display_name` / `group_name` for human-readable names. `sensors --group cpu` (or gpu/memory/storage/wireless/power/unknown) filters rows. Raw `name` and `id` remain unchanged. `label_source` and `label_status` state the naming basis; community_mapping is not physical verification. A point number is not a CPU core number. Overview values are maxima over valid identified points, not package readings.
 
@@ -36,7 +36,7 @@ For a user-requested upgrade, repeat the installation flow to update the app, CL
 
 ## Agent-editable temperature rules
 
-Use the same local configuration as the native app. `macfan rules show` returns its absolute path (normally `~/Library/Application Support/MacFan/rules.json`), config, revision and runtime state; `macfan schema` includes `rules_configuration.default` and its JSON Schema. Config version 1 has global `enabled` (default false), selected `fan` ID and 1–16 rules. Each rule has `id`, `enabled`, `sensor_group`, `trigger_celsius`, `release_celsius`, `release_seconds` and `target_rpm` (`"max"` or integer RPM). Multiple rules target one fan and choose the highest active RPM.
+Use the same local configuration as the native app. `agenticfan rules show` returns its absolute path (normally `~/Library/Application Support/AgenticFan/rules.json`), config, revision and runtime state; `agenticfan schema` includes `rules_configuration.default` and its JSON Schema. Config version 1 has global `enabled` (default false), selected `fan` ID and 1–16 rules. Each rule has `id`, `enabled`, `sensor_group`, `trigger_celsius`, `release_celsius`, `release_seconds` and `target_rpm` (`"max"` or integer RPM). Multiple rules target one fan and choose the highest active RPM.
 
 The disabled default is CPU >=99 C -> reported fan maximum, then <=95 C continuously for five seconds -> system automatic. These are editable example values, not a universal thermal policy. Use the user's approved parameters before enabling; resolve missing trigger, target or release behavior instead of inventing a policy.
 
@@ -48,10 +48,10 @@ Rules consume only valid identified overview points, excluding unknown and calib
 
 ## Control with user authorization
 
-First read the actual limits and mode. Run `macfan helper status`; if control is authorized and the helper is missing or outdated, run `macfan helper install` once as the normal user and let the user complete system authentication. Subsequent control commands do not need sudo or further authorization dialogs. Never configure passwordless sudo. `helper uninstall` removes the service with administrator authorization; updates/removal refuse during active control. For a task authorizing a specific target and duration, invoke:
+First read the actual limits and mode. Run `agenticfan helper status`; if control is authorized and the helper is missing or outdated, run `agenticfan helper install` once as the normal user and let the user complete system authentication. Subsequent control commands do not need sudo or further authorization dialogs. Never configure passwordless sudo. `helper uninstall` removes the service with administrator authorization; updates/removal refuse during active control. For a task authorizing a specific target and duration, invoke:
 
 ```sh
-/absolute/path/to/macfan fans set --fan 0 --rpm 3000 --duration 30
+/absolute/path/to/agenticfan fans set --fan 0 --rpm 3000 --duration 30
 ```
 
 The numbers above are an example, not a universal recommendation. Choose only user-authorized, positive RPM within the selected fan's reported limits and a finite duration of 1–3600 seconds. Resolve missing control parameters with the user rather than inventing an autonomous temperature policy. Native writes go through the installed helper. Read-only monitoring does not require it. Helper access is granted to the installing local user, including agent processes belonging to that user.
@@ -61,11 +61,11 @@ Keep consuming the process output until it exits. `control_started` means the ta
 For an authorized request to stop manual control:
 
 ```sh
-/absolute/path/to/macfan fans auto --fan all
+/absolute/path/to/agenticfan fans auto --fan all
 ```
 
 Then read `fans` again. Exit code 7 means restoration was not verified; surface it promptly. Do not silently enable `--experimental-ftst`. A readable control interface is not evidence that physical actuation has been validated on this Mac.
 
 ## Report accurately
 
-Distinguish application installation, monitoring results, and fan-control validation. The guardian attempts restoration on expiry, cancellation or loss of its CLI parent, but cannot guarantee restoration if the guardian or kernel fails. Never describe MacFan as a hardware thermal-protection mechanism.
+Distinguish application installation, monitoring results, and fan-control validation. The guardian attempts restoration on expiry, cancellation or loss of its CLI parent, but cannot guarantee restoration if the guardian or kernel fails. Never describe AgenticFan as a hardware thermal-protection mechanism.

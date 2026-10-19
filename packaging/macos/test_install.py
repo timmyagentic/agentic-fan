@@ -26,7 +26,7 @@ def main():
     source.add_argument("--run-id")
     args = parser.parse_args()
     install_source = ["--dmg", args.dmg.resolve()] if args.dmg else ["--run-id", args.run_id]
-    with tempfile.TemporaryDirectory(prefix="macfan-install-test-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="agenticfan-install-test-") as temporary:
         work = Path(temporary)
         user = work / "user's directory with spaces"
         user.mkdir()
@@ -38,24 +38,24 @@ def main():
         assert messages[0]["data"]["installed"] and not messages[0]["data"]["hardware_settings_changed"]
         assert not messages[1]["data"]["hardware_write_tested"]
         print("Native diagnostic status:", messages[1]["data"]["status"])
-        executable = user / "Applications/MacFan.app/Contents/MacOS/macfan"
-        info = plistlib.loads((user / "Applications/MacFan.app/Contents/Info.plist").read_bytes())
-        assert info["CFBundleExecutable"] == "MacFanUI", "Finder must launch the actual native app"
+        executable = user / "Applications/AgenticFan.app/Contents/MacOS/agenticfan"
+        info = plistlib.loads((user / "Applications/AgenticFan.app/Contents/Info.plist").read_bytes())
+        assert info["CFBundleExecutable"] == "AgenticFanUI", "Finder must launch the actual native app"
         assert info.get("LSUIElement") is True, "Installed app must remain a menu-bar accessory without a Dock icon"
-        assert (executable.parent / "MacFanUI").is_file()
-        binary = user / ".local/bin/macfan"
+        assert (executable.parent / "AgenticFanUI").is_file()
+        binary = user / ".local/bin/agenticfan"
         assert binary.resolve() == executable.resolve()
         for folder in (".agents", ".claude"):
-            skill = user / folder / "skills/macfan/SKILL.md"
+            skill = user / folder / "skills/agenticfan/SKILL.md"
             assert skill.is_file() and "schema_version: 2" in skill.read_text()
         profile = (user / ".zprofile").read_text()
         assert profile.startswith("# Preserve user settings\n")
-        assert (user / ".zprofile.before-macfan").read_text() == "# Preserve user settings\n"
-        run("/usr/bin/codesign", "--verify", "--deep", "--strict", user / "Applications/MacFan.app")
+        assert (user / ".zprofile.before-agenticfan").read_text() == "# Preserve user settings\n"
+        run("/usr/bin/codesign", "--verify", "--deep", "--strict", user / "Applications/AgenticFan.app")
         run(*command, timeout=180)
         assert (user / ".zprofile").read_text() == profile
-        assert not list((user / "Applications").glob("MacFan.previous.*.app"))
-        demo_env = dict(os.environ, MACFAN_DEMO_DIR=str(work / "demo"))
+        assert not list((user / "Applications").glob("AgenticFan.previous.*.app"))
+        demo_env = dict(os.environ, AGENTICFAN_DEMO_DIR=str(work / "demo"))
         demo = json.loads(run(binary, "--demo", "doctor", env=demo_env).stdout)
         assert demo["simulated"] and demo["data"]["monitoring_available"]
         assert demo["schema_version"] == 2 and demo["data"]["status"] == "limited"
