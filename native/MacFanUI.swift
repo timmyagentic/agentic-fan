@@ -477,6 +477,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let popover = MenuPopover()
     private var subscription: AnyCancellable?
     private var mainWindow: NSWindow?
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Keep the same menu-bar-only behavior for direct native launches too.
+        NSApp.setActivationPolicy(.accessory)
+    }
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.instance = self
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
