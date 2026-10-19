@@ -34,6 +34,8 @@ bash "$macfan_checkout/repo/scripts/install-macos.sh" --agent codex
 
 首次正常打开已安装的 MacFan App 时，默认开启当前用户的登录自启。登录后只驻留菜单栏，不显示 Dock 图标，也不弹出或恢复主窗口。菜单栏的“打开主窗口”提供完整界面；应用设置中的“登录时自动启动”和 macOS 登录项设置均可关闭自启，后续启动会保留选择。只运行 CLI 或隔离安装测试不会注册登录项。
 
+App 启动时也会载入用户已有的温度规则；默认规则关闭。若先前已明确启用规则且 Helper 就绪，登录启动后也会按这些条件控扇。可先用 `macfan rules show` 查看配置，或用 `macfan rules disable --wait 8` 关闭并检查恢复回执。登录项开关与温度规则开关分别管理。
+
 Agent 可通过原生入口直接管理登录项，无需打开窗口。`status` 只读；`enable` / `disable` 对当前用户执行显式开关，返回 JSON 中的系统 `state`、`enabled` 和 `error`。这不会启动监测进程或修改风扇规则：
 
 ```sh

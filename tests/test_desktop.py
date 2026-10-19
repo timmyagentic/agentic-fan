@@ -78,6 +78,44 @@ class DesktopTests(unittest.TestCase):
             gui.run_control(["fans", "set"], demo=True, timeout=10)
         self.assertEqual(raised.exception.code, "RESTORE_UNCONFIRMED")
 
+    def test_packaging_smoke_keeps_user_rules_state_outside_demo(self):
+        from macfan import rules
+        script = Path(__file__).resolve().parents[1] / "packaging/macos/build.py"
+        spec = importlib.util.spec_from_file_location("macfan_dmg_build", script)
+        builder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(builder)
+        captured = {}
+
+        class EnvironmentCaptured(Exception):
+            pass
+
+        def capture(*arguments, **kwargs):
+            captured.update(kwargs["env"])
+            raise EnvironmentCaptured
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            user_rules = root / "user-rules.json"
+            user_rules.write_text(json.dumps(rules.DEFAULT))
+            user_state = rules.state_path(user_rules)
+            user_state.write_text('{"preserve": "live user runtime"}')
+            original_config, original_state = user_rules.read_bytes(), user_state.read_bytes()
+            work = root / "build-smoke"
+            work.mkdir()
+            with patch.dict(os.environ, {"MACFAN_RULES_PATH": str(user_rules)}), \
+                    patch.object(builder, "run", side_effect=capture), self.assertRaises(EnvironmentCaptured):
+                builder.smoke(root / "MacFan.app/Contents/MacOS/macfan", work)
+            # Exercise the same runner started by the native UI using the actual
+            # environment passed by the packager, not a simulated filesystem.
+            result = subprocess.run([sys.executable, "-m", "macfan", "--demo", "rules", "run", "--count", "1"],
+                                    env=captured, cwd=script.parents[2], capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            messages = [json.loads(line) for line in result.stdout.splitlines()]
+            self.assertTrue(all(message["simulated"] for message in messages))
+            self.assertEqual(user_rules.read_bytes(), original_config)
+            self.assertEqual(user_state.read_bytes(), original_state, "Build smoke must not overwrite a live runner's receipt")
+            self.assertTrue(rules.state_path(work / "demo/rules.json").is_file())
+
     @unittest.skipIf(sys.platform == "darwin", "Non-macOS build guard only")
     def test_dmg_builder_rejects_linux_without_creating_an_artifact(self):
         script = Path(__file__).resolve().parents[1] / "packaging/macos/build.py"
