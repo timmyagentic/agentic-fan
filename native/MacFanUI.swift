@@ -582,6 +582,14 @@ struct MacFanApplication: App {
             fputs("Native smoke testing requires --demo.\n", stderr)
             exit(2)
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--login-item") {
+            guard index + 2 == CommandLine.arguments.count,
+                  LoginItemSettings.shared.command(CommandLine.arguments[index + 1]) else {
+                fputs("Usage: MacFanUI [--demo] --login-item status|enable|disable\n", stderr)
+                exit(2)
+            }
+            exit(LoginItemSettings.shared.error == nil ? 0 : 1)
+        }
     }
     var body: some Scene {
         Window("MacFan", id: "main") { MainView(model: model) }
