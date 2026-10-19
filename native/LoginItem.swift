@@ -9,6 +9,13 @@ enum LoginItemState: String {
     case notFound = "not_found"
 }
 
+func loginItemOperation(_ arguments: [String]) -> String? {
+    let command = arguments.first == "--demo" ? Array(arguments.dropFirst()) : arguments
+    guard command.count == 2, command[0] == "--login-item",
+          ["status", "enable", "disable"].contains(command[1]) else { return nil }
+    return command[1]
+}
+
 protocol LoginItemService {
     var state: LoginItemState { get }
     func register() throws
@@ -70,7 +77,8 @@ final class LoginItemSettings: ObservableObject {
         guard !preferences.defaultApplied else { return }
         // Apply the default once; later launches respect changes in System Settings.
         preferences.defaultApplied = true
-        if state == .notRegistered { setEnabled(true) }
+        // A main app without an existing BTM record can also report notFound.
+        if state == .notRegistered || state == .notFound { setEnabled(true) }
     }
 
     func refresh() {
@@ -82,6 +90,9 @@ final class LoginItemSettings: ObservableObject {
         guard !demo else { return }
         preferences.defaultApplied = true
         error = nil
+        refresh()
+        if enabled && state == .enabled { return }
+        if !enabled && (state == .notRegistered || state == .notFound) { return }
         do {
             if enabled { try service.register() }
             else { try service.unregister() }

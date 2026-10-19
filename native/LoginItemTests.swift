@@ -36,14 +36,34 @@ struct LoginItemTests {
         assert(!settings.enabled && service.registrations == 1)
         settings.setEnabled(true)
         assert(settings.enabled && service.registrations == 2)
+        settings.setEnabled(true)
+        assert(service.registrations == 2, "Enabling an enabled login item is idempotent")
+        settings.setEnabled(false)
         settings.setEnabled(false)
         settings.configureDefault()
         assert(!settings.enabled && service.removals == 1 && service.registrations == 2)
-        for initial in [LoginItemState.enabled, .requiresApproval, .notFound] {
+        for initial in [LoginItemState.enabled, .requiresApproval] {
             let existing = FakeService(), saved = FakePreferences()
             existing.current = initial
             LoginItemSettings(service: existing, preferences: saved, demo: false).configureDefault()
             assert(existing.registrations == 0 && saved.defaultApplied)
+        }
+        let missingRecord = FakeService(), newPreferences = FakePreferences()
+        missingRecord.current = .notFound
+        let fresh = LoginItemSettings(service: missingRecord, preferences: newPreferences, demo: false)
+        fresh.configureDefault()
+        assert(fresh.enabled && missingRecord.registrations == 1,
+               "A main app without a BTM record still needs first-launch registration")
+
+        for operation in ["status", "enable", "disable"] {
+            assert(loginItemOperation(["--login-item", operation]) == operation)
+            assert(loginItemOperation(["--demo", "--login-item", operation]) == operation)
+        }
+        for invalid in [[String](), ["--login-item"], ["--login-item", "wrong"],
+                        ["--typo", "--login-item", "disable"], ["--login-item", "status", "extra"],
+                        ["--demo", "--demo", "--login-item", "enable"],
+                        ["--smoke", "--login-item", "enable"]] {
+            assert(loginItemOperation(invalid) == nil, "Invalid arguments must never reach a service")
         }
         let failing = FakeService(), attempted = FakePreferences()
         failing.fails = true
