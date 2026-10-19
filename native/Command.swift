@@ -54,9 +54,9 @@ final class Command {
         if let i = args.firstIndex(of: "--backend"), i + 1 < args.count {
             process.executableURL = URL(fileURLWithPath: args[i + 1])
         } else {
-            process.executableURL = URL(fileURLWithPath: args[0]).deletingLastPathComponent().appendingPathComponent("macfan")
+            process.executableURL = URL(fileURLWithPath: args[0]).deletingLastPathComponent().appendingPathComponent("agenticfan")
         }
-        process.arguments = (args.contains("--module") ? ["-m", "macfan"] : []) + arguments
+        process.arguments = (args.contains("--module") ? ["-m", "agenticfan"] : []) + arguments
         process.environment = ProcessInfo.processInfo.environment.merging(["PYINSTALLER_RESET_ENVIRONMENT": "1"]) { _, new in new }
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice

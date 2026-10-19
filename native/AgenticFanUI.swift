@@ -43,8 +43,8 @@ final class Monitor: ObservableObject {
     private var smokeStarted = false
     private var quitting = false
     private lazy var rulesConfigPath: String? = {
-        if let configured = ProcessInfo.processInfo.environment["MACFAN_RULES_PATH"], !configured.isEmpty { return configured }
-        return demo ? FileManager.default.temporaryDirectory.appendingPathComponent("macfan-demo-\(UUID().uuidString)/rules.json").path : nil
+        if let configured = ProcessInfo.processInfo.environment["AGENTICFAN_RULES_PATH"], !configured.isEmpty { return configured }
+        return demo ? FileManager.default.temporaryDirectory.appendingPathComponent("agenticfan-demo-\(UUID().uuidString)/rules.json").path : nil
     }()
     var online: Bool { snapshot != nil }
     var components: [Component] { snapshot?.temperatureOverview ?? [] }
@@ -304,7 +304,7 @@ final class Monitor: ObservableObject {
     func shutdown() { quitting = true; watch?.stop(); control?.stop(); utility?.stop(); rulesCommand?.stop() }
     private func finishSmoke(_ ok: Bool) {
         shutdown()
-        print(ok ? "MACFAN_NATIVE_SMOKE_OK" : "MACFAN_NATIVE_SMOKE_FAILED")
+        print(ok ? "AGENTICFAN_NATIVE_SMOKE_OK" : "AGENTICFAN_NATIVE_SMOKE_FAILED")
         fflush(stdout)
         exit(ok ? 0 : 1)
     }
@@ -542,7 +542,7 @@ struct RulesSheet: View {
                     NSPasteboard.general.setString(model.rulesPath, forType: .string)
                 }.font(.caption).disabled(model.rulesPath.isEmpty)
             }
-            Text(model.demo ? "演示模式使用独立配置，不会调整真实风扇。" : "Agent 可直接编辑此 JSON 文件，运行器会自动重新载入。退出 MacFan 前会确认已释放本应用的调速。")
+            Text(model.demo ? "演示模式使用独立配置，不会调整真实风扇。" : "Agent 可直接编辑此 JSON 文件，运行器会自动重新载入。退出 AgenticFan 前会确认已释放本应用的调速。")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if model.rulesChangedExternally {
                 Label("配置已从外部更新，请重新读取后再保存。", systemImage: "arrow.clockwise").font(.caption).foregroundStyle(.orange)
@@ -602,7 +602,7 @@ struct ServiceSettings: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("MacFan 设置").font(.headline)
+            Text("AgenticFan 设置").font(.headline)
             Toggle("登录时自动启动", isOn: Binding(get: { login.enabled }, set: { login.setEnabled($0) }))
                 .disabled(model.demo)
             Text(login.statusText).font(.caption).foregroundStyle(.secondary)
@@ -661,7 +661,7 @@ struct MainView: View {
             }.padding(.horizontal, 16).frame(height: 30)
         }.frame(width: 780, height: 375).background(Color(nsColor: .windowBackgroundColor))
             .toolbar {
-                ToolbarItem(placement: .principal) { HStack { Text("MacFan").fontWeight(.semibold); Text(model.machine).foregroundStyle(.secondary) }.font(.system(size: 12)) }
+                ToolbarItem(placement: .principal) { HStack { Text("AgenticFan").fontWeight(.semibold); Text(model.machine).foregroundStyle(.secondary) }.font(.system(size: 12)) }
                 ToolbarItem { Button("设置", systemImage: "gearshape") { model.showSettings = true } }
             }.modifier(SurfaceSheets(model: model))
     }
@@ -672,7 +672,7 @@ struct MenuPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                VStack(alignment: .leading, spacing: 3) { Text("MacFan").font(.headline); Text(model.machine).font(.caption).foregroundStyle(.secondary) }
+                VStack(alignment: .leading, spacing: 3) { Text("AgenticFan").font(.headline); Text(model.machine).font(.caption).foregroundStyle(.secondary) }
                 Spacer()
                 Button("设置", systemImage: "gearshape") { showMain(); model.showSettings = true }.labelStyle(.iconOnly).buttonStyle(.plain)
             }
@@ -730,12 +730,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Self.instance = self
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
-        item.button?.image = NSImage(systemSymbolName: "fanblades", accessibilityDescription: "MacFan")
+        item.button?.image = NSImage(systemSymbolName: "fanblades", accessibilityDescription: "AgenticFan")
         item.button?.imagePosition = .imageLeading
         item.button?.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         item.button?.target = self
         item.button?.action = #selector(togglePopover(_:))
-        item.button?.setAccessibilityLabel("MacFan 菜单栏")
+        item.button?.setAccessibilityLabel("AgenticFan 菜单栏")
         let host = NSHostingController(rootView: MenuPanel(model: Monitor.shared))
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
@@ -759,7 +759,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func verifyStartup() {
         func finish(_ ok: Bool) {
             Monitor.shared.shutdown()
-            print(ok ? "MACFAN_STARTUP_SMOKE_OK" : "MACFAN_STARTUP_SMOKE_FAILED")
+            print(ok ? "AGENTICFAN_STARTUP_SMOKE_OK" : "AGENTICFAN_STARTUP_SMOKE_FAILED")
             fflush(stdout)
             exit(ok ? 0 : 1)
         }
@@ -813,7 +813,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-struct MacFanApplication: App {
+struct AgenticFanApplication: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = Monitor.shared
     @Environment(\.openWindow) private var openWindow
@@ -826,14 +826,14 @@ struct MacFanApplication: App {
         if CommandLine.arguments.contains("--login-item") {
             guard let operation = loginItemOperation(Array(CommandLine.arguments.dropFirst())),
                   LoginItemSettings.shared.command(operation) else {
-                fputs("Usage: MacFanUI [--demo] --login-item status|enable|disable\n", stderr)
+                fputs("Usage: AgenticFanUI [--demo] --login-item status|enable|disable\n", stderr)
                 exit(2)
             }
             exit(LoginItemSettings.shared.error == nil ? 0 : 1)
         }
     }
     var body: some Scene {
-        Window("MacFan", id: "main") { MainView(model: model) }
+        Window("AgenticFan", id: "main") { MainView(model: model) }
             .defaultLaunchBehavior(.suppressed)
             .restorationBehavior(.disabled)
             .onChange(of: model.mainWindowRequest) {

@@ -11,8 +11,8 @@ import threading
 import time
 import unittest
 
-from macfan import rules
-from macfan.errors import MacFanError
+from agenticfan import rules
+from agenticfan.errors import AgenticFanError
 
 
 def config(**changes):
@@ -61,23 +61,23 @@ class RulesTests(unittest.TestCase):
         rules.save(self.path, config())
         before = self.path.read_bytes()
         for bad in [config(version=True), config(fan=True), config(enabled=1), config(rules=[])]:
-            with self.subTest(bad=bad), self.assertRaises(MacFanError):
+            with self.subTest(bad=bad), self.assertRaises(AgenticFanError):
                 rules.save(self.path, bad)
             self.assertEqual(self.path.read_bytes(), before)
         for changes in [{"release_celsius": 100}, {"trigger_celsius": float("nan")},
                         {"target_rpm": True}, {"sensor_group": []}, {"release_seconds": -1}]:
             bad = config(); bad["rules"][0].update(changes)
-            with self.subTest(changes=changes), self.assertRaises(MacFanError):
+            with self.subTest(changes=changes), self.assertRaises(AgenticFanError):
                 rules.validate(bad)
         for raw in [b'{"version":1,"version":1}', b'{"version":NaN}', b'x' * 65537]:
-            with self.assertRaises(MacFanError):
+            with self.assertRaises(AgenticFanError):
                 rules.decode(raw)
 
     def test_atomic_revision_check_prevents_agent_and_gui_lost_update(self):
         first = rules.save(self.path, config())
         external = config(); external["rules"][0]["trigger_celsius"] = 101
         rules.save(self.path, external)
-        with self.assertRaises(MacFanError) as error:
+        with self.assertRaises(AgenticFanError) as error:
             rules.save(self.path, config(), first.revision)
         self.assertEqual(error.exception.code, "CONFIG_CONFLICT")
         self.assertEqual(rules.load(self.path).config, external)
@@ -177,8 +177,8 @@ class RulesTransportTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / "rules.json"
-        self.env = dict(os.environ, MACFAN_DEMO_DIR=str(Path(self.temp.name) / "demo"))
-        self.base = [sys.executable, "-m", "macfan", "--demo"]
+        self.env = dict(os.environ, AGENTICFAN_DEMO_DIR=str(Path(self.temp.name) / "demo"))
+        self.base = [sys.executable, "-m", "agenticfan", "--demo"]
         self.root = Path(__file__).resolve().parents[1]
 
     def test_saved_configuration_is_not_reported_as_running(self):
@@ -208,7 +208,7 @@ class RulesTransportTests(unittest.TestCase):
 
     def test_live_rule_triggers_maximum_then_releases_after_five_cool_seconds(self):
         from unittest.mock import patch
-        from macfan.demo import demo_hardware
+        from agenticfan.demo import demo_hardware
         with patch.dict(os.environ, self.env):
             hw = demo_hardware()
             hw.smc.write("TCDX", struct.pack("<f", 100))
@@ -246,7 +246,7 @@ class RulesTransportTests(unittest.TestCase):
                 hw.close()
 
     def test_guardian_lease_expires_with_pipe_open_and_stops_manual_control(self):
-        from macfan.launch import guardian_command
+        from agenticfan.launch import guardian_command
         process = subprocess.Popen(guardian_command(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, text=True, cwd=self.root, env=self.env)
         try:
@@ -259,7 +259,7 @@ class RulesTransportTests(unittest.TestCase):
             self.assertEqual(process.wait(timeout=5), 0)
             messages = [json.loads(line) for line in process.stdout.read().splitlines()]
             self.assertTrue(messages[-1]["data"]["automatic_mode_verified"])
-            self.assertEqual(json.loads((Path(self.env["MACFAN_DEMO_DIR"]) / "state.json").read_text())["F0Md"], "00")
+            self.assertEqual(json.loads((Path(self.env["AGENTICFAN_DEMO_DIR"]) / "state.json").read_text())["F0Md"], "00")
         finally:
             if process.poll() is None:
                 process.kill()

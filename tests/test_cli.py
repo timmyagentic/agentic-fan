@@ -16,8 +16,8 @@ class CLITests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.env = dict(os.environ, MACFAN_DEMO_DIR=self.temp.name)
-        self.base = [sys.executable, "-m", "macfan"]
+        self.env = dict(os.environ, AGENTICFAN_DEMO_DIR=self.temp.name)
+        self.base = [sys.executable, "-m", "agenticfan"]
 
     def run_cli(self, *args, demo=True):
         result = subprocess.run(self.base + (["--demo"] if demo else []) + list(args),

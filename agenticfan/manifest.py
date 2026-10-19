@@ -5,12 +5,12 @@ from .temperatures import POLICY, STATUSES
 from .rules import DEFAULT
 
 MANIFEST = {
-    "name": "macfan", "version": __version__, "schema_version": SCHEMA_VERSION,
+    "name": "agenticfan", "version": __version__, "schema_version": SCHEMA_VERSION,
     "temperature_validation_policy": dict(POLICY),
     "description": "Local Mac temperature monitoring, bounded fan control and editable temperature rules.",
     "network_required": False, "model_required": False,
     "desktop_entry": {"option": "--gui", "default_when_bundled_without_arguments": True,
-                      "cli_path": "/Applications/MacFan.app/Contents/MacOS/macfan"},
+                      "cli_path": "/Applications/AgenticFan.app/Contents/MacOS/agenticfan"},
     "global_options": {"--demo": {"type": "boolean", "default": False, "description": "Explicit synthetic backend; never hardware."}},
     "commands": [
         {"command": "helper install", "effect": "system_configuration_write", "stream": False,
@@ -113,7 +113,7 @@ MANIFEST = {
 }
 
 MANIFEST["rules_configuration"] = {
-    "path": "~/Library/Application Support/MacFan/rules.json", "environment_override": "MACFAN_RULES_PATH",
+    "path": "~/Library/Application Support/AgenticFan/rules.json", "environment_override": "AGENTICFAN_RULES_PATH",
     "default": DEFAULT,
     "schema": {
         "type": "object", "additionalProperties": False, "required": ["version", "enabled", "fan", "rules"],

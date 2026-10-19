@@ -4,13 +4,13 @@ from pathlib import Path
 import runpy
 
 root = Path(SPECPATH).resolve().parents[1]
-version = runpy.run_path(str(root / "macfan" / "__init__.py"))["__version__"]
+version = runpy.run_path(str(root / "agenticfan" / "__init__.py"))["__version__"]
 analysis = Analysis(
     [str(root / "packaging" / "macos" / "launcher.py")],
     pathex=[str(root)],
     binaries=[],
-    datas=[(str(root / "macfan/agent_skill"), "macfan/agent_skill"),
-           (str(root / "macfan/THIRD_PARTY_NOTICES.md"), "macfan")],
+    datas=[(str(root / "agenticfan/agent_skill"), "agenticfan/agent_skill"),
+           (str(root / "agenticfan/THIRD_PARTY_NOTICES.md"), "agenticfan")],
     hiddenimports=[],
     hookspath=[],
     runtime_hooks=[],
@@ -23,7 +23,7 @@ executable = EXE(
     analysis.scripts,
     [],
     exclude_binaries=True,
-    name="macfan",
+    name="agenticfan",
     # Required for the CLI and guardian's JSON stdin/stdout, including when
     # the same executable is run by the GUI's administrator authorization.
     console=True,
@@ -32,19 +32,19 @@ executable = EXE(
     upx=False,
     argv_emulation=False,
     target_arch="arm64",
-    codesign_identity=os.environ.get("MACFAN_CODESIGN_IDENTITY") or None,
+    codesign_identity=os.environ.get("AGENTICFAN_CODESIGN_IDENTITY") or None,
     entitlements_file=None,
 )
 collection = COLLECT(
     executable, analysis.binaries, analysis.datas,
-    strip=False, upx=False, name="MacFan",
+    strip=False, upx=False, name="AgenticFan",
 )
 app = BUNDLE(
     collection,
-    name="MacFan.app",
-    bundle_identifier="io.github.timmyagentic.macfan",
+    name="AgenticFan.app",
+    bundle_identifier="io.github.timmyagentic.agenticfan",
     info_plist={
-        "CFBundleDisplayName": "MacFan",
+        "CFBundleDisplayName": "AgenticFan",
         "CFBundleShortVersionString": version,
         "CFBundleVersion": version,
         "LSBackgroundOnly": False,

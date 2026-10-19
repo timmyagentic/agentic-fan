@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 from .cli import snapshot
-from .errors import MacFanError, invalid
+from .errors import AgenticFanError, invalid
 from .launch import cli_command
 
 
@@ -40,7 +40,7 @@ def run_control(arguments: list[str], demo: bool, timeout: float) -> dict:
     command = cli_command(*(["--demo"] if demo else []), *arguments)
     if not demo:
         if sys.platform != "darwin":
-            raise MacFanError("UNSUPPORTED_PLATFORM", "真实硬件控制需要 macOS。", 3)
+            raise AgenticFanError("UNSUPPORTED_PLATFORM", "真实硬件控制需要 macOS。", 3)
         from .helper import status
         from .helper_install import manage
         helper = status()
@@ -51,10 +51,10 @@ def run_control(arguments: list[str], demo: bool, timeout: float) -> dict:
     if result.returncode:
         if messages and not messages[-1].get("ok"):
             error = messages[-1]["error"]
-            raise MacFanError(error["code"], error["message"], result.returncode, **error.get("details", {}))
-        raise MacFanError("CONTROL_FAILED", result.stderr.strip() or "权限请求被取消，或控制命令失败。")
+            raise AgenticFanError(error["code"], error["message"], result.returncode, **error.get("details", {}))
+        raise AgenticFanError("CONTROL_FAILED", result.stderr.strip() or "权限请求被取消，或控制命令失败。")
     if not messages or not messages[-1].get("ok") or not messages[-1].get("data", {}).get("automatic_mode_verified"):
-        raise MacFanError("RESTORE_UNCONFIRMED", "没有收到自动模式恢复确认，请复查风扇状态。", 7)
+        raise AgenticFanError("RESTORE_UNCONFIRMED", "没有收到自动模式恢复确认，请复查风扇状态。", 7)
     return messages[-1]
 
 
@@ -63,12 +63,12 @@ def main(demo=False, smoke_test=False):
     import os
     from pathlib import Path
     if sys.platform != "darwin":
-        raise MacFanError("UNSUPPORTED_PLATFORM", "The native desktop UI requires macOS.", 3)
+        raise AgenticFanError("UNSUPPORTED_PLATFORM", "The native desktop UI requires macOS.", 3)
     frozen = getattr(sys, "frozen", False)
-    native = (Path(sys.executable).parent / "MacFanUI" if frozen else
-              Path(__file__).resolve().parents[1] / "build/native/MacFanUI")
+    native = (Path(sys.executable).parent / "AgenticFanUI" if frozen else
+              Path(__file__).resolve().parents[1] / "build/native/AgenticFanUI")
     if not native.is_file():
-        raise MacFanError("NATIVE_UI_MISSING", "Build the native UI with python3 packaging/macos/build_native.py, or reinstall MacFan.app.", 3)
+        raise AgenticFanError("NATIVE_UI_MISSING", "Build the native UI with python3 packaging/macos/build_native.py, or reinstall AgenticFan.app.", 3)
     arguments = [str(native), "--backend", sys.executable]
     if not frozen:
         arguments.append("--module")

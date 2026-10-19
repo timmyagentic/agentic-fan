@@ -1,10 +1,10 @@
 # Agent 调用约定
 
-先调用 `macfan schema` 发现命令。MacFan 0.3.1 的输出协议为 `schema_version: 2`；升级后应重新读取约定。CLI 是本地工具，读写范围由命令限定，不含模型运行时或网络请求。
+先调用 `agenticfan schema` 发现命令。下一版 AgenticFan 0.4.2 的输出协议为 `schema_version: 2`；升级后应重新读取约定。CLI 是本地工具，读写范围由命令限定，不含模型运行时或网络请求。
 
-通过 DMG 安装后，可执行文件路径为 `/Applications/MacFan.app/Contents/MacOS/macfan`，无需 Python 环境。传入显式命令会进入 CLI；不带参数打开窗口。`--gui` 可以显式打开窗口。
+通过 DMG 安装后，可执行文件路径为 `/Applications/AgenticFan.app/Contents/MacOS/agenticfan`，无需 Python 环境。传入显式命令会进入 CLI；不带参数打开窗口。`--gui` 可以显式打开窗口。
 
-通过 [Agent 安装入口](../INSTALL.md) 安装时，App 默认位于 `~/Applications`，CLI 位于 `~/.local/bin/macfan`。Codex 的 `~/.agents/skills/macfan` 或 Claude Code 的 `~/.claude/skills/macfan` 中会安装 skill 及记录绝对可执行文件路径的 `installation.json`。当前进程可直接使用绝对路径，无需等待 PATH 更新。
+通过 [Agent 安装入口](../INSTALL.md) 安装时，App 默认位于 `~/Applications`，CLI 位于 `~/.local/bin/agenticfan`。Codex 的 `~/.agents/skills/agenticfan` 或 Claude Code 的 `~/.claude/skills/agenticfan` 中会安装 skill 及记录绝对可执行文件路径的 `installation.json`。当前进程可直接使用绝对路径，无需等待 PATH 更新。
 
 `doctor` 总是尽可能返回结构化诊断。`ok: true` 表示诊断完成。`temperature_interface_available` 表示至少一个接口返回读数，`monitoring_available` 表示至少一个测点通过合理性检查；两者可以不同。`data_quality` 描述当前温度样本质量；整体 `status` 在仍有可用读数但存在警告、错误或被排除读数时为 `limited`，全部无可用温度时为 `unavailable`。检查 `warnings`、`errors` 和带原始证据的 `sensor_issues`，不要只判断进程退出码。诊断不会触发管理员授权或风扇写入；`hardware_write_tested` 为 `false`。`control_interface_available` 仅是接口发现结果。
 
@@ -23,7 +23,7 @@ import json
 import subprocess
 
 process = subprocess.Popen(
-    ["/Applications/MacFan.app/Contents/MacOS/macfan", "--demo", "fans", "set",
+    ["/Applications/AgenticFan.app/Contents/MacOS/agenticfan", "--demo", "fans", "set",
      "--fan", "0", "--rpm", "3000", "--duration", "3"],
     stdout=subprocess.PIPE, text=True,
 )

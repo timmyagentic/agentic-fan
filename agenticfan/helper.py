@@ -23,17 +23,17 @@ import time
 from functools import lru_cache
 
 from . import __version__
-from .errors import MacFanError, invalid
+from .errors import AgenticFanError, invalid
 from .guardian import validate_duration
 from .protocol import emit, failure, success
 
-LABEL = 'io.github.timmyagentic.macfan.helper'
-BASE = Path('/Library/Application Support/MacFan')
+LABEL = 'io.github.timmyagentic.agenticfan.helper'
+BASE = Path('/Library/Application Support/AgenticFan')
 APP = BASE / 'Helper.app'
-EXECUTABLE = APP / 'Contents/MacOS/macfan'
+EXECUTABLE = APP / 'Contents/MacOS/agenticfan'
 CONFIG = BASE / 'helper.json'
 PLIST = Path('/Library/LaunchDaemons') / (LABEL + '.plist')
-SOCKET_DIRECTORY = Path('/var/run/macfan-helper')
+SOCKET_DIRECTORY = Path('/var/run/agenticfan-helper')
 SOCKET = SOCKET_DIRECTORY / 'control.sock'
 MAX_MESSAGE = 4096
 PROTOCOL = 1
@@ -62,7 +62,7 @@ def peer_uid(connection):
 def authorize(connection, allowed_uid):
     uid = peer_uid(connection)
     if uid not in (0, allowed_uid):
-        raise MacFanError('HELPER_ACCESS_DENIED', 'This user has not been authorized to control fans.', 4)
+        raise AgenticFanError('HELPER_ACCESS_DENIED', 'This user has not been authorized to control fans.', 4)
 
 
 def read_request(connection):
@@ -108,7 +108,7 @@ def validate_request(request):
     if set(request) != fields:
         raise invalid('Unexpected or missing helper request fields.')
     if (request['version'] != __version__ or request['build'] != build_id()) and operation != 'status':
-        raise MacFanError('HELPER_VERSION_MISMATCH', 'Run macfan helper install to update the helper.', 4,
+        raise AgenticFanError('HELPER_VERSION_MISMATCH', 'Run agenticfan helper install to update the helper.', 4,
                           helper_version=__version__, client_version=request['version'])
     return request
 
@@ -195,7 +195,7 @@ def relay(connection, request, stopping, command=None, env=None):
         if request['operation'] == 'set' and (code < 0 or (code == 0 and
                 (not last or last.get('event') != 'control_finished'))):
             code = 7
-            send(connection, failure(MacFanError('RESTORE_UNCONFIRMED',
+            send(connection, failure(AgenticFanError('RESTORE_UNCONFIRMED',
                  'Guardian exited without restoration confirmation. Run fans auto.', 7)))
         send(connection, {'helper_exit_code': max(code, 0) if code >= 0 else 7})
     finally:
@@ -221,7 +221,7 @@ def handle(connection, allowed_uid, stopping):
     except (BrokenPipeError, ConnectionResetError):
         pass
     except Exception as exc:
-        error = exc if isinstance(exc, MacFanError) else MacFanError('HELPER_IO_ERROR', str(exc))
+        error = exc if isinstance(exc, AgenticFanError) else AgenticFanError('HELPER_IO_ERROR', str(exc))
         try:
             send(connection, failure(error))
             send(connection, {'helper_exit_code': error.exit_code})
@@ -234,14 +234,14 @@ def handle(connection, allowed_uid, stopping):
 def check_root_path(path, directory=False):
     info = path.lstat()
     if info.st_uid != 0 or info.st_mode & 0o022 or stat.S_ISLNK(info.st_mode):
-        raise MacFanError('UNSAFE_HELPER_PATH', 'Helper files must be root-owned and not writable by other users.', path=str(path))
+        raise AgenticFanError('UNSAFE_HELPER_PATH', 'Helper files must be root-owned and not writable by other users.', path=str(path))
     if directory and not stat.S_ISDIR(info.st_mode):
-        raise MacFanError('UNSAFE_HELPER_PATH', 'Expected helper directory.', path=str(path))
+        raise AgenticFanError('UNSAFE_HELPER_PATH', 'Expected helper directory.', path=str(path))
 
 
 def serve():
     if os.geteuid() != 0 or not getattr(sys, 'frozen', False) or Path(sys.executable).resolve() != EXECUTABLE:
-        raise MacFanError('PERMISSION_DENIED', 'The helper must run from its installed root-owned bundle.', 4)
+        raise AgenticFanError('PERMISSION_DENIED', 'The helper must run from its installed root-owned bundle.', 4)
     for path in (BASE, APP, APP / 'Contents', APP / 'Contents/MacOS'):
         check_root_path(path, directory=True)
     check_root_path(EXECUTABLE)
@@ -295,11 +295,11 @@ def request(operation, *, output=emit, cancel_event=None, heartbeat=None, **para
     try:
         info = SOCKET_DIRECTORY.lstat()
         if info.st_uid != 0 or info.st_mode & 0o022 or not stat.S_ISDIR(info.st_mode):
-            raise MacFanError('UNSAFE_HELPER_PATH', 'Helper socket directory is not trusted.', 4)
+            raise AgenticFanError('UNSAFE_HELPER_PATH', 'Helper socket directory is not trusted.', 4)
         connection.settimeout(3)
         connection.connect(str(SOCKET))
         if peer_uid(connection) != 0:
-            raise MacFanError('HELPER_ACCESS_DENIED', 'The local service is not running as root.', 4)
+            raise AgenticFanError('HELPER_ACCESS_DENIED', 'The local service is not running as root.', 4)
         send(connection, payload)
         connection.settimeout(None)
         if can_signal: signal.signal(signal.SIGTERM, stop)
@@ -326,7 +326,7 @@ def request(operation, *, output=emit, cancel_event=None, heartbeat=None, **para
                 connection.shutdown(socket.SHUT_WR)
                 continue
             if not chunk:
-                raise MacFanError('RESTORE_UNCONFIRMED' if operation == 'set' else 'HELPER_UNAVAILABLE',
+                raise AgenticFanError('RESTORE_UNCONFIRMED' if operation == 'set' else 'HELPER_UNAVAILABLE',
                                   'Helper disconnected before completing the request.', 7 if operation == 'set' else 5)
             raw += chunk
             if len(raw) > 262144:
@@ -337,14 +337,14 @@ def request(operation, *, output=emit, cancel_event=None, heartbeat=None, **para
                 if 'helper_exit_code' in message:
                     code = message['helper_exit_code']
                     if code == 0 and operation == 'set' and (not last or last.get('event') != 'control_finished'):
-                        raise MacFanError('RESTORE_UNCONFIRMED', 'No restoration confirmation received.', 7)
+                        raise AgenticFanError('RESTORE_UNCONFIRMED', 'No restoration confirmation received.', 7)
                     return 130 if interrupted and code == 0 else code
                 last = message
                 output(message)
     except (FileNotFoundError, ConnectionRefusedError):
-        raise MacFanError('HELPER_NOT_INSTALLED', 'Run macfan helper install once to authorize fan control.', 4) from None
+        raise AgenticFanError('HELPER_NOT_INSTALLED', 'Run agenticfan helper install once to authorize fan control.', 4) from None
     except PermissionError:
-        raise MacFanError('HELPER_ACCESS_DENIED', 'This user cannot access the installed helper.', 4) from None
+        raise AgenticFanError('HELPER_ACCESS_DENIED', 'This user cannot access the installed helper.', 4) from None
     finally:
         if can_signal: signal.signal(signal.SIGTERM, old)
         connection.close()
@@ -358,6 +358,6 @@ def status():
             return {'installed': True, 'running': False, 'error': messages[-1].get('error')}
         data = messages[-1]['data']
         return {**data, 'compatible': data['version'] == __version__ and data['build'] == build_id()}
-    except (MacFanError, OSError) as exc:
+    except (AgenticFanError, OSError) as exc:
         return {'installed': PLIST.exists(), 'running': False,
-                'error': exc.as_dict() if isinstance(exc, MacFanError) else {'message': str(exc)}}
+                'error': exc.as_dict() if isinstance(exc, AgenticFanError) else {'message': str(exc)}}

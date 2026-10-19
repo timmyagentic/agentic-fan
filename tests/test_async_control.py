@@ -1,9 +1,9 @@
 import unittest
 from unittest.mock import patch
 
-from macfan.demo import MemorySMC
-from macfan.errors import MacFanError
-from macfan.hardware import Hardware
+from agenticfan.demo import MemorySMC
+from agenticfan.errors import AgenticFanError
+from agenticfan.hardware import Hardware
 
 
 class DelayedSMC(MemorySMC):
@@ -48,7 +48,7 @@ class AsyncControlTests(unittest.TestCase):
         def only_clock(seconds): smc.tick += seconds
         with patch('time.monotonic', side_effect=lambda: smc.tick), \
                 patch('time.sleep', side_effect=only_clock):
-            with self.assertRaises(MacFanError) as error:
+            with self.assertRaises(AgenticFanError) as error:
                 hw.apply([0], 3000)
             self.assertEqual(error.exception.code, 'CONTROL_REJECTED')
             self.assertEqual(error.exception.details['observed'], 'auto')
@@ -57,7 +57,7 @@ class AsyncControlTests(unittest.TestCase):
 
     def test_bitmap_updates_do_not_erase_other_pending_fan(self):
         smc = DelayedSMC()
-        from macfan.codecs import KeyInfo
+        from agenticfan.codecs import KeyInfo
         del smc.values['F0Md']; del smc.values['F1Md']
         smc.values['FS! '] = (KeyInfo('ui16', 2), b'\0\0')
         hw = Hardware(smc, simulated=True)

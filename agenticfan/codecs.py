@@ -5,7 +5,7 @@ import math
 import struct
 from dataclasses import dataclass
 
-from .errors import MacFanError, invalid
+from .errors import AgenticFanError, invalid
 
 
 @dataclass(frozen=True)
@@ -31,7 +31,7 @@ def key_number(key: str) -> int:
 def decode(info: KeyInfo, raw: bytes, *, require_finite=True) -> float:
     expected = SIZES.get(info.kind)
     if expected is None or info.size != expected or len(raw) != expected:
-        raise MacFanError("UNSUPPORTED_ENCODING", "Unsupported SMC type or payload length.",
+        raise AgenticFanError("UNSUPPORTED_ENCODING", "Unsupported SMC type or payload length.",
                           kind=info.kind, size=info.size, received=len(raw))
     if info.kind == "sp78":
         value = int.from_bytes(raw, "big", signed=True) / 256.0
@@ -42,7 +42,7 @@ def decode(info: KeyInfo, raw: bytes, *, require_finite=True) -> float:
     else:
         value = float(int.from_bytes(raw, "big"))
     if require_finite and not math.isfinite(value):
-        raise MacFanError("INVALID_READING", "SMC returned a non-finite value.", kind=info.kind)
+        raise AgenticFanError("INVALID_READING", "SMC returned a non-finite value.", kind=info.kind)
     return value
 
 
@@ -55,5 +55,5 @@ def encode_rpm(info: KeyInfo, rpm: float) -> bytes:
         return int(round(rpm * 4)).to_bytes(2, "big")
     if info.kind == "flt " and info.size == 4:
         return struct.pack("<f", rpm)
-    raise MacFanError("UNSUPPORTED_ENCODING", "The target key has an unsupported RPM encoding.",
+    raise AgenticFanError("UNSUPPORTED_ENCODING", "The target key has an unsupported RPM encoding.",
                       kind=info.kind, size=info.size)

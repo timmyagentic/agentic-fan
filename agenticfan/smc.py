@@ -5,7 +5,7 @@ import ctypes as C
 import sys
 
 from .codecs import KeyInfo, key_number
-from .errors import MacFanError, MissingKey
+from .errors import AgenticFanError, MissingKey
 
 
 class Version(C.Structure):
@@ -38,9 +38,9 @@ def bind(lib, name, args, result):
 class AppleSMC:
     def __init__(self):
         if sys.platform != "darwin":
-            raise MacFanError("UNSUPPORTED_PLATFORM", "Hardware access requires macOS. Use --demo for simulation.", 3)
+            raise AgenticFanError("UNSUPPORTED_PLATFORM", "Hardware access requires macOS. Use --demo for simulation.", 3)
         if C.sizeof(SMCData) != 80 or SMCData.payload.offset != 48:
-            raise MacFanError("UNSUPPORTED_ABI", "Unexpected AppleSMC structure layout.", 3)
+            raise AgenticFanError("UNSUPPORTED_ABI", "Unexpected AppleSMC structure layout.", 3)
         self.io = C.CDLL("/System/Library/Frameworks/IOKit.framework/IOKit")
         system = C.CDLL("/usr/lib/libSystem.B.dylib")
         match = bind(self.io, "IOServiceMatching", [C.c_char_p], C.c_void_p)
@@ -52,7 +52,7 @@ class AppleSMC:
                                 [C.c_uint32, C.c_uint32, C.c_void_p, C.c_size_t, C.c_void_p, C.POINTER(C.c_size_t)], C.c_uint32)
         entry = service(0, match(b"AppleSMC"))
         if not entry:
-            raise MacFanError("SMC_UNAVAILABLE", "AppleSMC is unavailable on this machine.", 3)
+            raise AgenticFanError("SMC_UNAVAILABLE", "AppleSMC is unavailable on this machine.", 3)
         self.connection = C.c_uint32()
         try:
             task = C.c_uint32.in_dll(system, "mach_task_self_").value
@@ -60,7 +60,7 @@ class AppleSMC:
         finally:
             self.release(entry)
         if result:
-            raise MacFanError("SMC_OPEN_FAILED", "Cannot open AppleSMC.", kernel_result=hex(result))
+            raise AgenticFanError("SMC_OPEN_FAILED", "Cannot open AppleSMC.", kernel_result=hex(result))
         self.cache: dict[str, KeyInfo] = {}
 
     def _call(self, request: SMCData, key: str = "") -> SMCData:
@@ -68,14 +68,14 @@ class AppleSMC:
         size = C.c_size_t(C.sizeof(response))
         result = self.call_method(self.connection, 2, C.byref(request), C.sizeof(request), C.byref(response), C.byref(size))
         if result:
-            raise MacFanError("SMC_IO_ERROR", "AppleSMC rejected the I/O request.",
+            raise AgenticFanError("SMC_IO_ERROR", "AppleSMC rejected the I/O request.",
                               key=key, command=request.command, kernel_result=hex(result))
         if size.value != C.sizeof(response):
-            raise MacFanError("SMC_SHORT_RESPONSE", "AppleSMC returned an unexpected structure size.", size=size.value)
+            raise AgenticFanError("SMC_SHORT_RESPONSE", "AppleSMC returned an unexpected structure size.", size=size.value)
         if response.result == 0x84:
             raise MissingKey(key)
         if response.result:
-            raise MacFanError("SMC_COMMAND_FAILED", "The SMC command failed.",
+            raise AgenticFanError("SMC_COMMAND_FAILED", "The SMC command failed.",
                               key=key, command=request.command, smc_result=response.result, smc_status=response.status)
         return response
 
@@ -84,7 +84,7 @@ class AppleSMC:
             data = SMCData(key=key_number(key), command=9)
             result = self._call(data, key).info
             if not 1 <= result.size <= 32:
-                raise MacFanError("SMC_INVALID_SIZE", "SMC payload size is outside 1..32 bytes.", key=key, size=result.size)
+                raise AgenticFanError("SMC_INVALID_SIZE", "SMC payload size is outside 1..32 bytes.", key=key, size=result.size)
             kind = result.kind.to_bytes(4, "big").decode("ascii", errors="replace")
             self.cache[key] = KeyInfo(kind, result.size, result.attributes)
         return self.cache[key]
@@ -98,7 +98,7 @@ class AppleSMC:
     def write(self, key: str, raw: bytes):
         info = self.info(key)
         if len(raw) != info.size:
-            raise MacFanError("SMC_INVALID_SIZE", "Write size does not match this key's metadata.", key=key)
+            raise AgenticFanError("SMC_INVALID_SIZE", "Write size does not match this key's metadata.", key=key)
         data = SMCData(key=key_number(key), command=6)
         data.info.size = len(raw)
         data.payload[:len(raw)] = raw
@@ -108,7 +108,7 @@ class AppleSMC:
         from .codecs import decode
         count = int(decode(self.info("#KEY"), self.read("#KEY")))
         if not 0 <= count <= 65536:
-            raise MacFanError("SMC_INVALID_COUNT", "Unreasonable SMC key count.", count=count)
+            raise AgenticFanError("SMC_INVALID_COUNT", "Unreasonable SMC key count.", count=count)
         # Exhaustive enumeration avoids assuming all firmware key tables are sorted.
         return [self._call(SMCData(command=8, index=i)).key.to_bytes(4, "big").decode("ascii", errors="replace")
                 for i in range(count)]

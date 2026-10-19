@@ -120,7 +120,7 @@ func ruleDocumentEnabled(_ document: String) -> Bool? {
 func ruleDocument(_ document: String, enabled: Bool) throws -> String {
     let data = Data(document.utf8)
     guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        throw NSError(domain: "MacFan", code: 2, userInfo: [NSLocalizedDescriptionKey: "规则必须是 JSON 对象。"])
+        throw NSError(domain: "AgenticFan", code: 2, userInfo: [NSLocalizedDescriptionKey: "规则必须是 JSON 对象。"])
     }
     object["enabled"] = enabled
     return try ruleDocument(object)
@@ -170,7 +170,7 @@ func rpmText(_ value: Double?) -> String {
 }
 func controlArguments(fan: Fan, rpm: Int, duration: Int) throws -> [String] {
     guard fan.canControl, (Int(fan.minRpm!)...Int(fan.maxRpm!)).contains(rpm), (1...3600).contains(duration) else {
-        throw NSError(domain: "MacFan", code: 2, userInfo: [NSLocalizedDescriptionKey: "请选择范围内的转速与 1–3600 秒的持续时间。"])
+        throw NSError(domain: "AgenticFan", code: 2, userInfo: [NSLocalizedDescriptionKey: "请选择范围内的转速与 1–3600 秒的持续时间。"])
     }
     return ["fans", "set", "--fan", String(fan.id), "--rpm", String(rpm), "--duration", String(duration)]
 }
