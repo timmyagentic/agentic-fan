@@ -77,6 +77,7 @@ struct ModelTests {
         } catch { fatalError(error.localizedDescription) }
     }
     static func testFrameBoundaries() {
+        print("TRACE: starting oversized-frame probe"); fflush(stdout)
         let producer = #"""
 import json, signal, sys, time
 signal.signal(signal.SIGTERM, lambda *_: None)
@@ -96,7 +97,10 @@ sys.stdout.flush()
         var lastSequence: Int?
         do {
             try task.run(event: { message in
-                if let error = message["error"] as? [String: Any], let text = error["message"] as? String { errors.append(text) }
+                if let error = message["error"] as? [String: Any], let text = error["message"] as? String {
+                    errors.append(text)
+                    print("TRACE: frame error \(errors.count)"); fflush(stdout)
+                }
                 let data = message["data"] as? [String: Any]
                 if message["event"] as? String == "control_finished", let source = data?["source"] as? String { receipts.append(source) }
                 if let sequence = data?["sequence"] as? Int { lastSequence = sequence }
@@ -108,6 +112,7 @@ sys.stdout.flush()
                 print("PASS: bounded frames, preserved errors, genuine receipts and final sample ordering")
                 exit(0)
             })
+            print("TRACE: frame producer pid \(task.process.processIdentifier)"); fflush(stdout)
         } catch { fatalError(error.localizedDescription) }
     }
 }
