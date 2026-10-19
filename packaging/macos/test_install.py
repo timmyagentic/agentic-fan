@@ -41,6 +41,7 @@ def main():
         executable = user / "Applications/MacFan.app/Contents/MacOS/macfan"
         info = plistlib.loads((user / "Applications/MacFan.app/Contents/Info.plist").read_bytes())
         assert info["CFBundleExecutable"] == "MacFanUI", "Finder must launch the actual native app"
+        assert info.get("LSUIElement") is True, "Installed app must remain a menu-bar accessory without a Dock icon"
         assert (executable.parent / "MacFanUI").is_file()
         binary = user / ".local/bin/macfan"
         assert binary.resolve() == executable.resolve()
