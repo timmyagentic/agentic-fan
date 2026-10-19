@@ -109,17 +109,25 @@ def main():
     demo = False
     hw = None
     stopped = False
+    lease_seconds = None
+    last_heartbeat = time.monotonic()
 
     def stop(signum, frame):
         nonlocal stopped
         stopped = True
 
     def wait_stop(timeout):
+        nonlocal last_heartbeat
         if stopped:
+            return True
+        if lease_seconds is not None and time.monotonic() - last_heartbeat >= lease_seconds:
             return True
         readable, _, _ = select.select([sys.stdin.fileno()], [], [], timeout)
         if readable:
-            os.read(sys.stdin.fileno(), 1)
+            raw = os.read(sys.stdin.fileno(), 1024)
+            if lease_seconds is not None and raw and all(byte == ord('.') for byte in raw):
+                last_heartbeat = time.monotonic()
+                return False
             return True  # Includes EOF after SIGKILL of the parent.
         return stopped
 
@@ -140,6 +148,11 @@ def main():
                 break
             raw.extend(byte)
         config = json.loads(raw)
+        lease_seconds = config.get('lease_seconds')
+        if lease_seconds is not None and (type(lease_seconds) not in (int, float)
+                                         or not math.isfinite(lease_seconds) or not 1 <= lease_seconds <= 10):
+            raise invalid('A heartbeat lease must be finite and between 1 and 10 seconds.')
+        last_heartbeat = time.monotonic()
         demo = config.get("demo") is True
         if config.get("experimental_ftst") not in (True, False):
             raise invalid("experimental_ftst must be boolean.")

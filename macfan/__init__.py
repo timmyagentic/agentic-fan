@@ -1,4 +1,4 @@
 """JSON-first local Mac hardware tools. No model or network service required."""
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 SCHEMA_VERSION = 2

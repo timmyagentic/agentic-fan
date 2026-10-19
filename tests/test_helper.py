@@ -27,9 +27,14 @@ class HelperProtocolTests(unittest.TestCase):
         for extra in ({'command': 'id'}, {'executable': '/bin/sh'}, {'key': 'F0Md'}, {'demo': True},
                       {'fans': [True]}, {'fans': [-1]}, {'fans': [0, 0]}, {'fans': 'all'},
                       {'duration': float('nan')}, {'duration': 3601}, {'rpm': True},
+                      {'lease_seconds': True}, {'lease_seconds': 0}, {'lease_seconds': 11}, {'lease_seconds': float('nan')},
                       {'rpm': 0}, {'experimental_ftst': 1}, {'operation': 'exec'}):
             with self.subTest(extra=extra), self.assertRaises(MacFanError):
                 helper.validate_request(request(**extra))
+
+    def test_rules_lease_is_bounded_and_optional(self):
+        helper.validate_request(request(lease_seconds=5))
+        helper.validate_request(request())
 
     def test_version_mismatch_rejected_before_hardware(self):
         with self.assertRaises(MacFanError) as error:
