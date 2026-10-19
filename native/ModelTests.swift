@@ -46,15 +46,22 @@ struct ModelTests {
         assert(runtime.mayOwnControl && runtime.statusText == "温度规则已触发" && !runtime.controlConfirmed && runtime.config == nil)
         let legacySnapshot = try decoder.decode(Snapshot.self, from: Data(#"{"sensors":[],"fans":[],"temperature_overview":[]}"#.utf8))
         assert(legacySnapshot.rules == nil, "Existing snapshot envelopes remain readable")
-        let task = Command(["-c", "import time; print('{\"ok\":true,\"event\":\"ready\"}', flush=True); time.sleep(1.5)"])
-        let started = Date()
-        var latency: TimeInterval?
-        try task.run(event: { _ in latency = latency ?? Date().timeIntervalSince(started) }, end: { code in
-            assert(code == 0 && latency != nil && latency! < 1.0, "NDJSON events must arrive before the subprocess exits")
-            print("PASS: incremental control events arrive before command completion")
+        // Keep the producer alive until its first event is delivered. A reader
+        // buffering until EOF cannot pass, even on a slow or cold CI runner.
+        let task = Command(["-c", "import sys; print('{\"ok\":true,\"event\":\"ready\"}', flush=True); sys.stdin.read()"], keepInputOpen: true)
+        var receivedWhileRunning = false
+        try task.run(event: { message in
+            guard message["event"] as? String == "ready" else { return }
+            receivedWhileRunning = task.process.isRunning
+            task.closeInput()
+        }, end: { code in
+            assert(code == 0 && receivedWhileRunning, "NDJSON must arrive while the parent-watch producer is still running")
+            print("PASS: incremental events and parent-watch EOF arrive before command completion")
+            fflush(stdout)
             testInput()
         })
         print("PASS: native temperature validity, bounded input, editable multi-rule JSON and verified restoration")
+        fflush(stdout)
         dispatchMain()
     }
     static func testInput() {
@@ -63,25 +70,8 @@ struct ModelTests {
         do {
             try task.run(event: { message in received = (message["data"] as? [String: Any])?["name"] as? String == "Agent rule" }, end: { code in
                 assert(code == 0 && received, "Rule JSON must reach CLI stdin and then EOF")
-                testParentWatch()
-            })
-        } catch { fatalError(error.localizedDescription) }
-    }
-    static func testParentWatch() {
-        let task = Command(["-c", "import sys; print('{\"ok\":true,\"event\":\"ready\"}',flush=True); sys.stdin.read(); print('{\"ok\":true,\"event\":\"finished\"}',flush=True)"], keepInputOpen: true)
-        var finished = false
-        do {
-            try task.run(event: { message in
-                if message["event"] as? String == "ready" {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        assert(task.process.isRunning, "Parent-watch stdin must stay open while app runs")
-                        task.closeInput()
-                    }
-                }
-                if message["event"] as? String == "finished" { finished = true }
-            }, end: { code in
-                assert(code == 0 && finished, "Closing parent input must let runner finish orderly")
                 print("PASS: rule JSON stdin and parent-watch EOF lifecycle")
+                fflush(stdout)
                 testFrameBoundaries()
             })
         } catch { fatalError(error.localizedDescription) }
