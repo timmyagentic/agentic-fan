@@ -9,7 +9,7 @@ def main(argv=None):
     if args == ["--internal-helper"] or (len(args) == 2 and args[0] in
             ("--internal-helper-install", "--internal-helper-uninstall")):
         from .protocol import emit, success, failure
-        from .errors import MacFanError
+        from .errors import AgenticFanError
         try:
             if args == ["--internal-helper"]:
                 from .helper import serve
@@ -19,7 +19,7 @@ def main(argv=None):
             emit(success(action(int(args[1]))))
             return 0
         except Exception as exc:
-            error = exc if isinstance(exc, MacFanError) else MacFanError("HELPER_ERROR", str(exc))
+            error = exc if isinstance(exc, AgenticFanError) else AgenticFanError("HELPER_ERROR", str(exc))
             emit(failure(error))
             return error.exit_code
     if args == ["--internal-guardian"]:

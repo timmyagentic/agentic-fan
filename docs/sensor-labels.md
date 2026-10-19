@@ -4,7 +4,7 @@
 
 命名来源：
 
-- M4 / M4 Pro / M4 Max 按芯片型号精确选择公开映射，不按 `T*` 前缀猜测位置。少量键名映射参考 MIT 开源的 [Stats](https://github.com/exelban/stats/blob/4ecf4f736056eb488c75aa2fa62e749abd87c4a4/Modules/Sensors/values.swift)，许可证随 App 打包在 macfan/THIRD_PARTY_NOTICES.md。
+- M4 / M4 Pro / M4 Max 按芯片型号精确选择公开映射，不按 `T*` 前缀猜测位置。少量键名映射参考 MIT 开源的 [Stats](https://github.com/exelban/stats/blob/4ecf4f736056eb488c75aa2fa62e749abd87c4a4/Modules/Sensors/values.swift)，许可证随 App 打包在 agenticfan/THIRD_PARTY_NOTICES.md。
 - IOHID 的 NAND、PMU、CPU/GPU 等 Product 名称翻译成中文，保留系统编号。PMU tcal 参考读数不纳入温度概览。
 - 没有适用映射的键继续显示为未识别，例如本机的 TCMb、TCMz、TPD0；没有把它们猜成 CPU 总温度或某个接口。
 - 测点编号只区分读数，不代表物理 CPU 核心编号或数量。`label_verified` 仍为 false；命名不等于物理安装位置/校准验证。

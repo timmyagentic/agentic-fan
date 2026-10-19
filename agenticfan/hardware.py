@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 
 from .codecs import KeyInfo, decode, encode_rpm
-from .errors import MacFanError, MissingKey, invalid
+from .errors import AgenticFanError, MissingKey, invalid
 from .temperatures import reading
 
 
@@ -37,7 +37,7 @@ class Hardware:
     def count(self) -> int:
         value = self.number("FNum")
         if value != int(value) or not 0 <= value <= 10:
-            raise MacFanError("UNSUPPORTED_FAN_COUNT", "Expected 0..10 fans with single-digit SMC indices.", count=value)
+            raise AgenticFanError("UNSUPPORTED_FAN_COUNT", "Expected 0..10 fans with single-digit SMC indices.", count=value)
         return int(value)
 
     def mode_key(self, index: int) -> str | None:
@@ -46,12 +46,12 @@ class Hardware:
             info = self.optional_info(key)
             if info is not None:
                 if info.kind != "ui8 " or info.size != 1:
-                    raise MacFanError("UNSUPPORTED_ENCODING", "Unsupported fan mode encoding.", key=key)
+                    raise AgenticFanError("UNSUPPORTED_ENCODING", "Unsupported fan mode encoding.", key=key)
                 return key
         info = self.optional_info("FS! ")
         if info is not None:
             if info.size != 2 or info.kind not in ("ui16", "hex_"):
-                raise MacFanError("UNSUPPORTED_ENCODING", "Unsupported fan bitmap encoding.")
+                raise AgenticFanError("UNSUPPORTED_ENCODING", "Unsupported fan bitmap encoding.")
             return "FS! "
         return None
 
@@ -73,12 +73,12 @@ class Hardware:
                     label = self.smc.read(f"F{index}ID")[4:16].split(b"\0", 1)[0].decode("ascii", errors="replace").strip()
                     if label:
                         row["name"] = label
-            except MacFanError as exc:
+            except AgenticFanError as exc:
                 row["errors"].append(exc.as_dict())
             for field, suffix in (("actual_rpm", "Ac"), ("min_rpm", "Mn"), ("max_rpm", "Mx"), ("target_rpm", "Tg")):
                 try:
                     row[field] = self.number(f"F{index}{suffix}")
-                except MacFanError as exc:
+                except AgenticFanError as exc:
                     row[field] = None
                     row["errors"].append(exc.as_dict())
             try:
@@ -89,7 +89,7 @@ class Hardware:
                     (info.kind, info.size) in (("fpe2", 2), ("flt ", 4)) and
                     all(row[x] is not None for x in ("actual_rpm", "min_rpm", "max_rpm", "target_rpm")) and
                     0 <= row["min_rpm"] < row["max_rpm"])
-            except MacFanError as exc:
+            except AgenticFanError as exc:
                 row.update(mode="unknown", mode_key=None)
                 row["errors"].append(exc.as_dict())
             rows.append(row)
@@ -105,7 +105,7 @@ class Hardware:
                         info = self.smc.info(key)
                         if (info.kind, info.size) in (("sp78", 2), ("flt ", 4)):
                             keys.append(key)
-                    except MacFanError as exc:
+                    except AgenticFanError as exc:
                         self.warnings.append(exc.as_dict())
             self._temperature_keys = keys
         rows = []
@@ -118,7 +118,7 @@ class Hardware:
                 # Fan/RPM decoding continues to reject non-finite values.
                 value = decode(self.smc.info(key), self.smc.read(key), require_finite=False)
                 row.update(reading(value))
-            except MacFanError as exc:
+            except AgenticFanError as exc:
                 row["error"] = exc.as_dict()
             rows.append(row)
         if self.hid:
@@ -130,12 +130,12 @@ class Hardware:
 
     def require_write(self):
         if not self.simulated and os.geteuid() != 0:
-            raise MacFanError("PERMISSION_DENIED", "Fan writes require an explicitly privileged invocation (sudo). Monitoring does not.", 4)
+            raise AgenticFanError("PERMISSION_DENIED", "Fan writes require an explicitly privileged invocation (sudo). Monitoring does not.", 4)
 
     def _set_mode(self, index: int, manual: bool):
         key = self.mode_key(index)
         if not key:
-            raise MacFanError("CONTROL_UNSUPPORTED", "No recognized fan mode key.", 3, fan=index)
+            raise AgenticFanError("CONTROL_UNSUPPORTED", "No recognized fan mode key.", 3, fan=index)
         if key == "FS! ":
             current = int.from_bytes(self.smc.read(key), "big")
             updated = current | (1 << index) if manual else current & ~(1 << index)
@@ -155,12 +155,12 @@ class Hardware:
             fan = available[index]
             for error in fan["errors"]:
                 if error["code"] not in ("KEY_NOT_FOUND", "UNSUPPORTED_ENCODING"):
-                    raise MacFanError(error["code"], error["message"], **error["details"])
+                    raise AgenticFanError(error["code"], error["message"], **error["details"])
             if not fan["control_available"] or fan["mode"] == "unknown":
-                raise MacFanError("CONTROL_UNSUPPORTED", "Fan lacks a recognized, readable control interface.", 3,
+                raise AgenticFanError("CONTROL_UNSUPPORTED", "Fan lacks a recognized, readable control interface.", 3,
                                   fan=index, failures=fan["errors"])
             if fan["mode"] != "auto":
-                raise MacFanError("CONTROL_CONFLICT", "A selected fan is already under manual control. Restore auto explicitly first.", 6, fan=index)
+                raise AgenticFanError("CONTROL_CONFLICT", "A selected fan is already under manual control. Restore auto explicitly first.", 6, fan=index)
             if rpm <= 0 or not fan["min_rpm"] <= rpm <= fan["max_rpm"] or not math.isfinite(rpm):
                 raise invalid("RPM must be positive and within this fan's hardware range.",
                               fan=index, minimum=fan["min_rpm"], maximum=fan["max_rpm"])
@@ -168,11 +168,11 @@ class Hardware:
         if experimental_ftst:
             info = self.optional_info("Ftst")
             if info is None or (info.kind, info.size) != ("ui8 ", 1):
-                raise MacFanError("CONTROL_UNSUPPORTED", "No recognized Ftst interface.", 3)
+                raise AgenticFanError("CONTROL_UNSUPPORTED", "No recognized Ftst interface.", 3)
             if self.smc.read("Ftst") != b"\0" or any(row["mode"] != "auto" for row in available.values()):
-                raise MacFanError("CONTROL_CONFLICT", "Experimental global Ftst control requires all fans in auto and Ftst cleared.", 6)
+                raise AgenticFanError("CONTROL_CONFLICT", "Experimental global Ftst control requires all fans in auto and Ftst cleared.", 6)
         elif self.optional_info("Ftst") and self.smc.read("Ftst") != b"\0":
-            raise MacFanError("CONTROL_CONFLICT", "Global Ftst is already active. Restore the existing controller before starting a session.", 6)
+            raise AgenticFanError("CONTROL_CONFLICT", "Global Ftst is already active. Restore the existing controller before starting a session.", 6)
 
     def apply(self, indices: list[int], rpm: int, experimental_ftst=False, wait=None):
         # Caller must validate and hold the write lock. Its finally block owns rollback,
@@ -197,7 +197,7 @@ class Hardware:
             self._wait_value(lambda: self.number(f"F{index}Tg"), lambda x: abs(x - rpm) <= 1,
                              "CONTROL_REJECTED", wait=wait, fan=index, field="target_rpm", expected=rpm)
             if self.mode(index) != "manual":
-                raise MacFanError("CONTROL_REJECTED", "Hardware did not retain the requested mode/target.", fan=index)
+                raise AgenticFanError("CONTROL_REJECTED", "Hardware did not retain the requested mode/target.", fan=index)
 
     @staticmethod
     def _wait_value(read, accepted, code, wait=None, **details):
@@ -212,7 +212,7 @@ class Hardware:
                 return
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise MacFanError(code, "Hardware readback did not settle within 3 seconds.",
+                raise AgenticFanError(code, "Hardware readback did not settle within 3 seconds.",
                                   observed=observed, **details)
             (wait or time.sleep)(min(.05, remaining))
 
@@ -224,7 +224,7 @@ class Hardware:
                 self._set_mode(index, False)
                 self._wait_value(lambda: self.mode(index), lambda x: x == "auto",
                                  "RESTORE_REJECTED", fan=index, field="mode")
-            except MacFanError as exc:
+            except AgenticFanError as exc:
                 errors.append(exc.as_dict())
         if experimental_ftst:
             try:
@@ -233,17 +233,17 @@ class Hardware:
                     self._wait_value(lambda: self.smc.read("Ftst").hex(), lambda x: x == "00",
                                      "RESTORE_REJECTED", field="Ftst")
                 else:
-                    raise MacFanError("RESTORE_CONFLICT", "Another manual fan prevents clearing global Ftst.")
-            except MacFanError as exc:
+                    raise AgenticFanError("RESTORE_CONFLICT", "Another manual fan prevents clearing global Ftst.")
+            except AgenticFanError as exc:
                 errors.append(exc.as_dict())
         else:
             try:
                 if self.optional_info("Ftst") and self.smc.read("Ftst") != b"\0":
-                    raise MacFanError("FTST_STILL_ACTIVE", "Fan modes are auto, but global Ftst is active. Its recovery requires --experimental-ftst.")
-            except MacFanError as exc:
+                    raise AgenticFanError("FTST_STILL_ACTIVE", "Fan modes are auto, but global Ftst is active. Its recovery requires --experimental-ftst.")
+            except AgenticFanError as exc:
                 errors.append(exc.as_dict())
         if errors:
-            raise MacFanError("RESTORE_FAILED", "Automatic control could not be verified. Retry fans auto and inspect the hardware.", 7, failures=errors)
+            raise AgenticFanError("RESTORE_FAILED", "Automatic control could not be verified. Retry fans auto and inspect the hardware.", 7, failures=errors)
 
     def close(self):
         if self.hid:
@@ -260,6 +260,6 @@ def native_hardware(include_temperatures=True) -> Hardware:
         from .hid import HIDTemperatures
         try:
             hid = HIDTemperatures()
-        except (OSError, AttributeError, MacFanError) as exc:
+        except (OSError, AttributeError, AgenticFanError) as exc:
             warnings.append({"code": "HID_UNAVAILABLE", "message": str(exc)})
     return Hardware(smc, hid=hid, warnings=warnings)

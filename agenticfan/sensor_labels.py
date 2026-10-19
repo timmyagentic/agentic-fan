@@ -104,7 +104,7 @@ def describe(row, device):
                     'TB0T': ('电池演示测点', 'battery'), 'Tp00': ('CPU 待确认演示测点', 'cpu')}
         if key in fixtures:
             name, group = fixtures[key]
-            label(name, group, 'simulated', '明确模拟数据，不用于真实硬件映射。', 'MacFan demo fixture')
+            label(name, group, 'simulated', '明确模拟数据，不用于真实硬件映射。', 'AgenticFan demo fixture')
     result['group_name'] = GROUPS[result['group']]
     return result
 

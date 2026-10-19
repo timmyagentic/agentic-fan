@@ -25,8 +25,8 @@ def run(*args, **kwargs):
 
 def smoke(executable: Path, directory: Path, gui=True):
     """Exercise the bundled runtime outside the checkout, without system Python."""
-    env = dict(os.environ, MACFAN_DEMO_DIR=str(directory / "demo"),
-               MACFAN_RULES_PATH=str(directory / "demo/rules.json"), PATH="/usr/bin:/bin:/usr/sbin:/sbin")
+    env = dict(os.environ, AGENTICFAN_DEMO_DIR=str(directory / "demo"),
+               AGENTICFAN_RULES_PATH=str(directory / "demo/rules.json"), PATH="/usr/bin:/bin:/usr/sbin:/sbin")
     for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
         env.pop(key, None)
     for arguments in (
@@ -57,17 +57,17 @@ def smoke(executable: Path, directory: Path, gui=True):
         raise RuntimeError("Packaged app failed temperature-quality regression")
     if gui:
         for operation in ("status", "enable", "disable"):
-            login = run(executable.parent / "MacFanUI", "--demo", "--login-item", operation,
+            login = run(executable.parent / "AgenticFanUI", "--demo", "--login-item", operation,
                         cwd=directory, env=env, capture_output=True, text=True, timeout=30)
             report = json.loads(login.stdout)
             if not report["simulated"] or report["enabled"] or report["error"]:
                 raise RuntimeError("Demo login item command was not isolated")
         run(executable, "--gui", "--demo", "--gui-smoke-test", cwd=directory, env=env, timeout=30)
         # Also exercise the exact native entry selected by LaunchServices/Finder.
-        run(executable.parent / "MacFanUI", "--demo", "--smoke", cwd=directory, env=env, timeout=30)
-        startup = run(executable.parent / "MacFanUI", "--demo", "--startup-smoke",
+        run(executable.parent / "AgenticFanUI", "--demo", "--smoke", cwd=directory, env=env, timeout=30)
+        startup = run(executable.parent / "AgenticFanUI", "--demo", "--startup-smoke",
                       cwd=directory, env=env, capture_output=True, text=True, timeout=30)
-        if "MACFAN_STARTUP_SMOKE_OK" not in startup.stdout:
+        if "AGENTICFAN_STARTUP_SMOKE_OK" not in startup.stdout:
             raise RuntimeError(f"Native menu-bar startup failed: {startup.stdout}\n{startup.stderr}")
 
 
@@ -92,45 +92,45 @@ def main(argv=None):
             parser.error(f"Required macOS build tool is missing: {tool}")
     import PyInstaller
 
-    version = runpy.run_path(str(ROOT / "macfan" / "__init__.py"))["__version__"]
+    version = runpy.run_path(str(ROOT / "agenticfan" / "__init__.py"))["__version__"]
     flavor = "" if args.notary_profile else "-signed-unnotarized" if args.identity else "-dev"
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    dmg = output / f"MacFan-{version}-arm64{flavor}.dmg"
+    dmg = output / f"AgenticFan-{version}-arm64{flavor}.dmg"
     if dmg.exists():
         parser.error(f"Output already exists; choose a clean --output directory: {dmg}")
-    with tempfile.TemporaryDirectory(prefix="macfan-build-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="agenticfan-build-") as temporary:
         work = Path(temporary).resolve()
         from build_native import build as build_native
-        native = build_native(work / "MacFanUI")
+        native = build_native(work / "AgenticFanUI")
         products = work / "products"
         env = dict(os.environ)
         env["PYINSTALLER_CONFIG_DIR"] = str(work / "pyinstaller-cache")
-        env.pop("MACFAN_CODESIGN_IDENTITY", None)
+        env.pop("AGENTICFAN_CODESIGN_IDENTITY", None)
         if args.identity:
-            env["MACFAN_CODESIGN_IDENTITY"] = args.identity
+            env["AGENTICFAN_CODESIGN_IDENTITY"] = args.identity
         run(sys.executable, "-m", "PyInstaller", "--clean", "--noconfirm",
-            "--distpath", products, "--workpath", work / "build", ROOT / "packaging/macos/macfan.spec",
+            "--distpath", products, "--workpath", work / "build", ROOT / "packaging/macos/agenticfan.spec",
             cwd=ROOT, env=env)
-        app = products / "MacFan.app"
-        executable = app / "Contents/MacOS/macfan"
+        app = products / "AgenticFan.app"
+        executable = app / "Contents/MacOS/agenticfan"
         if not executable.is_file():
             raise RuntimeError("PyInstaller did not produce the expected application bundle")
-        shutil.copy2(native, app / "Contents/MacOS/MacFanUI")
+        shutil.copy2(native, app / "Contents/MacOS/AgenticFanUI")
         # The OS must register the actual Cocoa executable, not an exec() trampoline.
         # Otherwise modern macOS rejects the status-item scene after Finder launch.
         info_path = app / "Contents/Info.plist"
         info = plistlib.loads(info_path.read_bytes())
-        info['CFBundleExecutable'] = 'MacFanUI'
+        info['CFBundleExecutable'] = 'AgenticFanUI'
         info_path.write_bytes(plistlib.dumps(info))
         signing = ["--options", "runtime", "--timestamp"] if args.identity else []
         run("codesign", "--force", "--sign", args.identity or "-", *signing, executable)
-        run("codesign", "--force", "--sign", args.identity or "-", *signing, app / "Contents/MacOS/MacFanUI")
+        run("codesign", "--force", "--sign", args.identity or "-", *signing, app / "Contents/MacOS/AgenticFanUI")
         run("codesign", "--force", "--sign", args.identity or "-", *signing, app)
         run("codesign", "--verify", "--deep", "--strict", app)
         smoke(executable, work)
         if args.notary_profile:
-            archive = work / "MacFan.zip"
+            archive = work / "AgenticFan.zip"
             run("ditto", "-c", "-k", "--keepParent", app, archive)
             notarize(archive, args.notary_profile)
             run("xcrun", "stapler", "staple", app)
@@ -138,10 +138,10 @@ def main(argv=None):
 
         staging = work / "image"
         staging.mkdir()
-        run("ditto", app, staging / "MacFan.app")
+        run("ditto", app, staging / "AgenticFan.app")
         (staging / "Applications").symlink_to("/Applications", target_is_directory=True)
         staged_dmg = work / dmg.name
-        run("hdiutil", "create", "-volname", "MacFan", "-srcfolder", staging,
+        run("hdiutil", "create", "-volname", "AgenticFan", "-srcfolder", staging,
             "-format", "UDZO", "-fs", "HFS+", staged_dmg)
         if args.identity:
             run("codesign", "--sign", args.identity, "--timestamp", staged_dmg)
@@ -161,8 +161,8 @@ def main(argv=None):
                 raise RuntimeError("DMG did not mount at the expected path")
             if not (mount / "Applications").is_symlink() or os.readlink(mount / "Applications") != "/Applications":
                 raise RuntimeError("DMG is missing the Applications installation link")
-            run("codesign", "--verify", "--deep", "--strict", mount / "MacFan.app")
-            smoke(mount / "MacFan.app/Contents/MacOS/macfan", work)
+            run("codesign", "--verify", "--deep", "--strict", mount / "AgenticFan.app")
+            smoke(mount / "AgenticFan.app/Contents/MacOS/agenticfan", work)
         finally:
             run("hdiutil", "detach", mount)
         shutil.copy2(staged_dmg, dmg)

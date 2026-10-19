@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import ctypes as C
 
-from .errors import MacFanError
+from .errors import AgenticFanError
 from .smc import bind
 from .temperatures import reading
 
@@ -48,7 +48,7 @@ class HIDTemperatures:
             objects.append(match)
             self.client = create_client(None)
             if not self.client:
-                raise MacFanError("HID_UNAVAILABLE", "Cannot create an IOHID temperature client.")
+                raise AgenticFanError("HID_UNAVAILABLE", "Cannot create an IOHID temperature client.")
             matching(self.client, match)
             self.services = services(self.client)
             if not self.services:

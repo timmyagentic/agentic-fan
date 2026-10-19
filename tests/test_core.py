@@ -6,13 +6,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from macfan.codecs import KeyInfo, decode, encode_rpm, key_number
-from macfan.demo import MemorySMC, fixture
-from macfan.errors import MacFanError, MissingKey
-from macfan.guardian import run_session, validate_duration
-from macfan.hardware import Hardware
-from macfan.runtime import lock, runtime_directory
-from macfan.smc import SMCData
+from agenticfan.codecs import KeyInfo, decode, encode_rpm, key_number
+from agenticfan.demo import MemorySMC, fixture
+from agenticfan.errors import AgenticFanError, MissingKey
+from agenticfan.guardian import run_session, validate_duration
+from agenticfan.hardware import Hardware
+from agenticfan.runtime import lock, runtime_directory
+from agenticfan.smc import SMCData
 
 
 class CodecTests(unittest.TestCase):
@@ -28,18 +28,18 @@ class CodecTests(unittest.TestCase):
 
     def test_nonfinite_and_invalid_payloads(self):
         for value in (math.inf, -math.inf, math.nan):
-            with self.assertRaises(MacFanError):
+            with self.assertRaises(AgenticFanError):
                 decode(KeyInfo("flt ", 4), struct.pack("<f", value))
         for info, raw in ((KeyInfo("sp78", 4), b"\0" * 4), (KeyInfo("flt ", 4), b"\0"), (KeyInfo("junk", 2), b"\0\0")):
-            with self.assertRaises(MacFanError):
+            with self.assertRaises(AgenticFanError):
                 decode(info, raw)
-        with self.assertRaises(MacFanError):
+        with self.assertRaises(AgenticFanError):
             encode_rpm(KeyInfo("fpe2", 2), 16384)
 
     def test_key_and_abi(self):
         self.assertEqual(key_number("F0Ac"), 0x46304163)
         for bad in ("F00Ac", "F", "温度测试"):
-            with self.assertRaises(MacFanError):
+            with self.assertRaises(AgenticFanError):
                 key_number(bad)
         self.assertEqual(ctypes.sizeof(SMCData), 80)
         self.assertEqual(SMCData.payload.offset, 48)
@@ -90,17 +90,17 @@ class HardwareTests(unittest.TestCase):
 
     def test_all_targets_validated_before_writes(self):
         self.smc.values["F1Mx"] = (KeyInfo("flt ", 4), struct.pack("<f", 2500))
-        with self.assertRaises(MacFanError) as caught:
+        with self.assertRaises(AgenticFanError) as caught:
             self.hw.validate_control([0, 1], 3000)
         self.assertEqual(caught.exception.code, "INVALID_ARGUMENT")
         self.assertEqual(self.smc.writes, [])
 
     def test_already_manual_and_unknown_fans_rejected(self):
         self.smc.write("F0Md", b"\1")
-        with self.assertRaises(MacFanError) as caught:
+        with self.assertRaises(AgenticFanError) as caught:
             self.hw.validate_control([0], 3000)
         self.assertEqual(caught.exception.code, "CONTROL_CONFLICT")
-        with self.assertRaises(MacFanError):
+        with self.assertRaises(AgenticFanError):
             self.hw.validate_control([12], 3000)
 
     def test_failed_probe_is_not_absence(self):
@@ -108,11 +108,11 @@ class HardwareTests(unittest.TestCase):
 
         def probe(key):
             if key == "F0md":
-                raise MacFanError("SMC_IO_ERROR", "transport down")
+                raise AgenticFanError("SMC_IO_ERROR", "transport down")
             return original(key)
 
         self.smc.info = probe
-        with self.assertRaises(MacFanError) as caught:
+        with self.assertRaises(AgenticFanError) as caught:
             self.hw.validate_control([0], 3000)
         self.assertEqual(caught.exception.code, "SMC_IO_ERROR")
         self.assertEqual(self.smc.writes, [])
@@ -127,14 +127,14 @@ class HardwareTests(unittest.TestCase):
     def test_ftst_does_not_clear_under_another_manual_fan(self):
         self.smc.write("F1Md", b"\1")
         self.smc.write("Ftst", b"\1")
-        with self.assertRaises(MacFanError) as caught:
+        with self.assertRaises(AgenticFanError) as caught:
             self.hw.restore([0], True)
         self.assertEqual(caught.exception.code, "RESTORE_FAILED")
         self.assertEqual(self.smc.read("Ftst"), b"\1")
 
     def test_normal_restore_reports_active_ftst_instead_of_claiming_success(self):
         self.smc.write("Ftst", b"\1")
-        with self.assertRaises(MacFanError) as caught:
+        with self.assertRaises(AgenticFanError) as caught:
             self.hw.restore([0, 1])
         self.assertEqual(caught.exception.code, "RESTORE_FAILED")
         self.assertEqual(caught.exception.details["failures"][0]["code"], "FTST_STILL_ACTIVE")
@@ -143,7 +143,7 @@ class HardwareTests(unittest.TestCase):
     def test_does_not_start_when_global_ftst_is_already_active(self):
         self.smc.write("Ftst", b"\1")
         self.smc.writes.clear()
-        with self.assertRaises(MacFanError) as caught:
+        with self.assertRaises(AgenticFanError) as caught:
             self.hw.validate_control([0], 3000)
         self.assertEqual(caught.exception.code, "CONTROL_CONFLICT")
         self.assertEqual(self.smc.writes, [])
@@ -155,19 +155,19 @@ class HardwareTests(unittest.TestCase):
 
         def write(key, raw):
             if key == "F0Md":
-                raise MacFanError("IO_FAIL", "failed")
+                raise AgenticFanError("IO_FAIL", "failed")
             original(key, raw)
 
         self.smc.write = write
-        with self.assertRaises(MacFanError) as caught:
+        with self.assertRaises(AgenticFanError) as caught:
             self.hw.restore([0, 1])
         self.assertEqual(caught.exception.exit_code, 7)
         self.assertEqual(self.hw.mode(1), "auto")
 
     def test_native_writes_need_privilege(self):
         self.hw.simulated = False
-        with patch("macfan.hardware.os.geteuid", return_value=501):
-            with self.assertRaises(MacFanError) as caught:
+        with patch("agenticfan.hardware.os.geteuid", return_value=501):
+            with self.assertRaises(AgenticFanError) as caught:
                 self.hw.validate_control([0], 3000)
         self.assertEqual(caught.exception.code, "PERMISSION_DENIED")
 
@@ -212,11 +212,11 @@ class SessionTests(unittest.TestCase):
 
         def write(key, raw):
             if key == "F1Tg":
-                raise MacFanError("IO_FAIL", "injected partial write failure")
+                raise AgenticFanError("IO_FAIL", "injected partial write failure")
             original(key, raw)
 
         self.smc.write = write
-        with self.assertRaises(MacFanError) as caught:
+        with self.assertRaises(AgenticFanError) as caught:
             self.run_control([0, 1], ftst=True)
         self.assertEqual(caught.exception.code, "IO_FAIL")
         self.assertEqual([self.hw.mode(i) for i in (0, 1)], ["auto", "auto"])
@@ -231,7 +231,7 @@ class SessionTests(unittest.TestCase):
             self.smc.values["F0Ac"] = (KeyInfo("flt ", 4), old)
 
         self.smc.write = write
-        with self.assertRaises(MacFanError) as caught:
+        with self.assertRaises(AgenticFanError) as caught:
             self.run_control()
         self.assertEqual(caught.exception.code, "CONTROL_NOT_CONFIRMED")
         self.assertEqual(self.hw.mode(0), "auto")
@@ -257,7 +257,7 @@ class SessionTests(unittest.TestCase):
 
     def test_preexisting_manual_not_reset_after_validation_failure(self):
         self.smc.write("F0Md", b"\1")
-        with self.assertRaises(MacFanError):
+        with self.assertRaises(AgenticFanError):
             self.run_control()
         self.assertEqual(self.hw.mode(0), "manual")
 
@@ -266,18 +266,18 @@ class SessionTests(unittest.TestCase):
 
         def write(key, raw):
             if key == "F0Md" and raw == b"\0":
-                raise MacFanError("IO_FAIL", "cannot restore")
+                raise AgenticFanError("IO_FAIL", "cannot restore")
             original(key, raw)
 
         self.smc.write = write
-        with self.assertRaises(MacFanError) as caught:
+        with self.assertRaises(AgenticFanError) as caught:
             self.run_control()
         self.assertEqual(caught.exception.code, "RESTORE_FAILED")
         self.assertFalse(any(e["event"] == "control_finished" for e in self.events))
 
     def test_second_session_cannot_start(self):
         with lock(Path(self.temp.name), "session.lock"):
-            with self.assertRaises(MacFanError) as caught:
+            with self.assertRaises(AgenticFanError) as caught:
                 self.run_control()
         self.assertEqual(caught.exception.code, "CONTROL_BUSY")
         self.assertEqual(self.smc.writes, [])
@@ -289,14 +289,14 @@ class SessionTests(unittest.TestCase):
                 self.smc.write("F0Tg", struct.pack("<f", 4000))
             return False
 
-        with self.assertRaises(MacFanError) as caught:
+        with self.assertRaises(AgenticFanError) as caught:
             self.run_control(wait=wait)
         self.assertEqual(caught.exception.code, "CONTROL_LOST")
         self.assertEqual(self.hw.mode(0), "auto")
 
     def test_duration_cannot_disable_expiry(self):
         for value in (0, -1, 3601, math.inf, math.nan, True):
-            with self.assertRaises(MacFanError):
+            with self.assertRaises(AgenticFanError):
                 validate_duration(value)
 
 

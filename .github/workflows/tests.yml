@@ -31,5 +31,5 @@ jobs:
       - name: Installed entry point
         run: |
           cd "$RUNNER_TEMP"
-          macfan schema
-          macfan --demo snapshot
+          agenticfan schema
+          agenticfan --demo snapshot

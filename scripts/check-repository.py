@@ -23,7 +23,7 @@ def parse_version(value):
 
 def validate_version(package, metadata, released, level="patch"):
     if package != metadata:
-        raise ValueError("macfan/__init__.py and pyproject.toml versions differ")
+        raise ValueError("agenticfan/__init__.py and pyproject.toml versions differ")
     current, prerelease = parse_version(package)
     stable, stable_prerelease = parse_version(released.removeprefix("v"))
     if stable_prerelease:
@@ -44,7 +44,7 @@ def validate_version(package, metadata, released, level="patch"):
 
 
 def source_versions(root):
-    module = ast.parse((root / "macfan/__init__.py").read_text())
+    module = ast.parse((root / "agenticfan/__init__.py").read_text())
     package = next(ast.literal_eval(node.value) for node in module.body
                    if isinstance(node, ast.Assign)
                    and any(isinstance(target, ast.Name) and target.id == "__version__"

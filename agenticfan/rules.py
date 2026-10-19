@@ -21,7 +21,7 @@ import tempfile
 import threading
 import time
 
-from .errors import MacFanError, invalid
+from .errors import AgenticFanError, invalid
 from .protocol import failure, success
 from .runtime import lock, runtime_directory
 
@@ -34,11 +34,11 @@ DEFAULT = {"version": 1, "enabled": False, "fan": 0, "rules": [
 
 
 def default_path(demo=False):
-    if os.environ.get("MACFAN_RULES_PATH"):
-        return Path(os.environ["MACFAN_RULES_PATH"]).expanduser().absolute()
+    if os.environ.get("AGENTICFAN_RULES_PATH"):
+        return Path(os.environ["AGENTICFAN_RULES_PATH"]).expanduser().absolute()
     if demo:
         return runtime_directory(True) / "rules.json"
-    return Path.home() / "Library/Application Support/MacFan/rules.json"
+    return Path.home() / "Library/Application Support/AgenticFan/rules.json"
 
 
 def _number(value):
@@ -147,7 +147,7 @@ def save(path, config, expected_revision=None):
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with lock(path.parent, "." + path.name + ".writer.lock"):
         if expected_revision is not None and load(path).revision != expected_revision:
-            raise MacFanError("CONFIG_CONFLICT", "Rules changed since they were read. Reload and merge your edits before applying.", 6)
+            raise AgenticFanError("CONFIG_CONFLICT", "Rules changed since they were read. Reload and merge your edits before applying.", 6)
         atomic_json(path, config, durable=True)
         return load(path)
 
@@ -229,7 +229,7 @@ class Evaluator:
             if active:
                 if (not fan or not fan.get("control_available") or not _number(fan.get("min_rpm"))
                         or not _number(fan.get("max_rpm")) or not 0 < fan["min_rpm"] < fan["max_rpm"]):
-                    raise MacFanError("RULE_FAN_UNAVAILABLE", "Selected fan has no usable control interface or RPM bounds.")
+                    raise AgenticFanError("RULE_FAN_UNAVAILABLE", "Selected fan has no usable control interface or RPM bounds.")
                 rpm = math.floor(fan["max_rpm"]) if rule["target_rpm"] == "max" else rule["target_rpm"]
                 if not fan["min_rpm"] <= rpm <= fan["max_rpm"]:
                     raise invalid("Rule target is outside this fan's reported RPM bounds.", rule_id=name,
@@ -272,7 +272,7 @@ class Control:
                                experimental_ftst=False, lease_seconds=5, output=self.messages.put,
                                cancel_event=self.cancelled, heartbeat=lambda: time.monotonic() < self.fresh_until)
         except Exception as exc:
-            error = exc if isinstance(exc, MacFanError) else MacFanError("RULE_CONTROL_ERROR", str(exc))
+            error = exc if isinstance(exc, AgenticFanError) else AgenticFanError("RULE_CONTROL_ERROR", str(exc))
             self.messages.put(failure(error, self.demo))
             code = error.exit_code
         finally:
@@ -330,7 +330,7 @@ class Runner:
                 decision = {"desired_rpm": None, "active_rule_ids": [], "cooling": False,
                             "readings": {}, "rule_states": [], "readings_available": False}
                 error = "Temperature sampling exceeded the three-second freshness window; control was released."
-        except (OSError, MacFanError, ValueError) as exc:
+        except (OSError, AgenticFanError, ValueError) as exc:
             decision = {"desired_rpm": None, "active_rule_ids": [], "cooling": False, "readings": {}, "rule_states": []}
             config = None
             error = str(exc)
@@ -399,7 +399,7 @@ class Runner:
             try:
                 fan = next((f for f in read_fans() if f["id"] == control.fan), None)
                 verified = bool(fan and fan.get("mode") == "auto")
-            except (OSError, MacFanError):
+            except (OSError, AgenticFanError):
                 pass
         if completed and not control.started and control.exit_code in (0, 2, 3, 4, 6):
             verified = True  # Rejected before writes; do not override another owner.
@@ -451,11 +451,11 @@ def run(path, hw, sample, output, *, demo=False, parent_watch=False, count=None)
                     wait(max(0, 1 - (time.monotonic() - started)))
         except BrokenPipeError:
             broken_output, reason = True, "consumer_disconnected"
-        except (OSError, MacFanError, ValueError) as exc:
+        except (OSError, AgenticFanError, ValueError) as exc:
             code, reason = 5, "monitoring_failed"
             if not broken_output:
                 try:
-                    output(failure(exc if isinstance(exc, MacFanError) else MacFanError("RULE_MONITOR_ERROR", str(exc)), demo))
+                    output(failure(exc if isinstance(exc, AgenticFanError) else AgenticFanError("RULE_MONITOR_ERROR", str(exc)), demo))
                 except BrokenPipeError:
                     broken_output = True
         finally:

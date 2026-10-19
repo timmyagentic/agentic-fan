@@ -8,8 +8,8 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-from macfan import gui, helper_install
-from macfan.errors import MacFanError
+from agenticfan import gui, helper_install
+from agenticfan.errors import AgenticFanError
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,12 +26,12 @@ class NativeTests(unittest.TestCase):
 
     def test_frozen_gui_passes_explicit_backend_and_demo_flags_without_shell(self):
         with patch.object(sys, 'platform', 'darwin'), patch.object(sys, 'frozen', True, create=True), \
-                patch.object(sys, 'executable', '/Applications/A quoted app/MacFan.app/Contents/MacOS/macfan'), \
+                patch.object(sys, 'executable', '/Applications/A quoted app/AgenticFan.app/Contents/MacOS/agenticfan'), \
                 patch.object(Path, 'is_file', return_value=True), patch.object(os, 'execv') as execute:
             gui.main(demo=True, smoke_test=True)
         binary, arguments = execute.call_args.args
-        self.assertEqual(binary, '/Applications/A quoted app/MacFan.app/Contents/MacOS/MacFanUI')
-        self.assertEqual(arguments, [binary, '--backend', '/Applications/A quoted app/MacFan.app/Contents/MacOS/macfan', '--demo', '--smoke'])
+        self.assertEqual(binary, '/Applications/A quoted app/AgenticFan.app/Contents/MacOS/AgenticFanUI')
+        self.assertEqual(arguments, [binary, '--backend', '/Applications/A quoted app/AgenticFan.app/Contents/MacOS/agenticfan', '--demo', '--smoke'])
 
     @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Native model tests require the macOS Swift toolchain')
     def test_native_model_contracts(self):
@@ -78,10 +78,10 @@ class HelperUpgradeTests(unittest.TestCase):
 
     def test_stop_timeout_prevents_replacement(self):
         with patch.object(helper_install, 'run', return_value=subprocess.CompletedProcess([], 0)), \
-                patch.object(helper_install.time, 'monotonic', side_effect=[0, 11]), self.assertRaises(MacFanError) as error:
+                patch.object(helper_install.time, 'monotonic', side_effect=[0, 11]), self.assertRaises(AgenticFanError) as error:
             helper_install.stop_helper()
         self.assertEqual(error.exception.code, 'HELPER_STOP_FAILED')
 
     def test_lookup_error_does_not_mean_service_removed(self):
-        with patch.object(helper_install, 'run', return_value=subprocess.CompletedProcess([], 5)), self.assertRaises(MacFanError):
+        with patch.object(helper_install, 'run', return_value=subprocess.CompletedProcess([], 5)), self.assertRaises(AgenticFanError):
             helper_install.stop_helper()
