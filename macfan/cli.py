@@ -61,6 +61,21 @@ def parser():
         command.add_argument("--experimental-ftst", action="store_true", help="explicitly enable unverified global Ftst protocol")
     set_fan.add_argument("--rpm", type=int, required=True)
     set_fan.add_argument("--duration", type=float, required=True, help="session duration in seconds (1..3600)")
+    rules = commands.add_parser("rules", help="inspect, validate, edit and run local temperature rules")
+    rule_actions = rules.add_subparsers(dest="rules_action", required=True)
+    for name in ("show", "validate", "apply", "enable", "disable", "status", "run"):
+        command = rule_actions.add_parser(name)
+        command.add_argument("--config", type=Path, help="rules destination (default: MACFAN_RULES_PATH or ~/Library/Application Support/MacFan/rules.json)")
+        if name in ("apply", "enable", "disable"):
+            command.add_argument("--wait", type=float, default=0, help="wait up to 10 seconds for the runner to load this exact generation")
+            command.add_argument("--if-revision", help="reject instead of overwriting an externally edited revision")
+        if name in ("validate", "apply"):
+            source = command.add_mutually_exclusive_group(required=name == "apply")
+            source.add_argument("--file", type=Path, help="input JSON file; --config remains the destination")
+            source.add_argument("--stdin", action="store_true", help="read input JSON from stdin")
+        if name == "run":
+            command.add_argument("--parent-watch", action="store_true", help="stop and restore owned control when stdin closes")
+            command.add_argument("--count", type=int, help="stop after this many one-second samples, then restore")
     return root
 
 
@@ -163,6 +178,51 @@ def main(argv=None):
             from .agent import integrate
             emit(success(integrate(Path(sys.executable), args.user_root, args.target)))
             return 0
+        if args.command == "rules":
+            from . import rules
+            path = (args.config.expanduser().absolute() if args.config else rules.default_path(args.demo))
+            action = args.rules_action
+            if action in ("apply", "enable", "disable") and (not math.isfinite(args.wait) or not 0 <= args.wait <= 10):
+                raise invalid("--wait must be finite and between 0 and 10 seconds.")
+            if action == "show":
+                document = rules.load(path)
+                emit(success({"path": str(path), "config": document.config, "revision": document.revision,
+                              "generation": document.generation, "exists": document.exists, "runtime": rules.status(path)}, args.demo))
+                return 0
+            if action == "status":
+                emit(success(rules.status(path), args.demo))
+                return 0
+            if action in ("validate", "apply"):
+                if args.stdin:
+                    raw = sys.stdin.buffer.read(rules.MAX_BYTES + 1)
+                    config = rules.decode(raw)
+                elif args.file:
+                    with args.file.open("rb") as stream:
+                        config = rules.decode(stream.read(rules.MAX_BYTES + 1))
+                else:
+                    config = rules.load(path).config
+                if action == "validate":
+                    emit(success({"valid": True, "config": config, "path": str(path)}, args.demo))
+                else:
+                    document = rules.save(path, config, args.if_revision)
+                    emit(success(rules.saved_result(document, args.wait), args.demo))
+                return 0
+            if action in ("enable", "disable"):
+                document = rules.load(path)
+                document.config["enabled"] = action == "enable"
+                # Protect the read/modify/write even if no explicit CAS was requested.
+                document = rules.save(path, document.config, args.if_revision or document.revision)
+                emit(success(rules.saved_result(document, args.wait), args.demo))
+                return 0
+            if args.count is not None and args.count < 1:
+                raise invalid("Count must be positive.")
+            if args.demo:
+                from .demo import demo_hardware
+                hw = demo_hardware()
+            else:
+                hw = native_hardware()
+            return rules.run(path, hw, snapshot, emit, demo=args.demo,
+                             parent_watch=args.parent_watch, count=args.count)
         if args.command == "watch":
             if not math.isfinite(args.interval) or not 0.2 <= args.interval <= 3600:
                 raise invalid("Watch interval must be finite and between 0.2 and 3600 seconds.")

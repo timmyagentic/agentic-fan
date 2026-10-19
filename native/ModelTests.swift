@@ -33,15 +33,91 @@ struct ModelTests {
         var beforeStarted = ControlReceipt()
         beforeStarted.receive(["error": ["code": "RESTORE_FAILED", "message": "restore failed"]])
         assert(beforeStarted.recoveryRequired)
+        let document = #"{"version":1,"enabled":false,"fan":0,"note":"preserve me","rules":[{"id":"cpu-hot","enabled":true,"sensor_group":"cpu","trigger_celsius":99,"release_celsius":95,"release_seconds":5,"target_rpm":"max","note":"keep rule fields"},{"id":"gpu-warm","enabled":true,"sensor_group":"gpu","trigger_celsius":90,"release_celsius":85,"release_seconds":10,"target_rpm":4200}]}"#
+        let config = try decoder.decode(RulesConfiguration.self, from: Data(document.utf8))
+        assert(!config.enabled && config.rules.count == 2 && config.rules[0].targetRpm == .maximum && config.rules[1].targetRpm == .rpm(4200))
+        assert(config.rules[0].summary.contains("99°C") && config.rules[0].summary.contains("95°C") && config.rules[0].summary.contains("5 秒"))
+        let edited = try ruleDocument(document, enabled: true)
+        let preserved = try JSONSerialization.jsonObject(with: Data(edited.utf8)) as! [String: Any]
+        assert(ruleDocumentEnabled(edited) == true && preserved["note"] as? String == "preserve me")
+        assert((preserved["rules"] as? [[String: Any]])?.first?["note"] as? String == "keep rule fields")
+        assert(ruleDocumentEnabled(#"{"enabled":1}"#) == nil && ruleDocumentEnabled("invalid") == nil)
+        let runtime = try decoder.decode(RulesRuntime.self, from: Data(#"{"enabled":true,"status":"active","config_path":"/tmp/rules.json","loaded_revision":"abc","desired_rpm":4900,"active_rule_ids":["cpu-hot"],"control_confirmed":false}"#.utf8))
+        assert(runtime.mayOwnControl && runtime.statusText == "温度规则已触发" && !runtime.controlConfirmed && runtime.config == nil)
+        let legacySnapshot = try decoder.decode(Snapshot.self, from: Data(#"{"sensors":[],"fans":[],"temperature_overview":[]}"#.utf8))
+        assert(legacySnapshot.rules == nil, "Existing snapshot envelopes remain readable")
         let task = Command(["-c", "import time; print('{\"ok\":true,\"event\":\"ready\"}', flush=True); time.sleep(1.5)"])
         let started = Date()
         var latency: TimeInterval?
         try task.run(event: { _ in latency = latency ?? Date().timeIntervalSince(started) }, end: { code in
             assert(code == 0 && latency != nil && latency! < 1.0, "NDJSON events must arrive before the subprocess exits")
             print("PASS: incremental control events arrive before command completion")
-            exit(0)
+            testInput()
         })
-        print("PASS: native temperature validity, bounded input, event progression and verified restoration")
+        print("PASS: native temperature validity, bounded input, editable multi-rule JSON and verified restoration")
         dispatchMain()
+    }
+    static func testInput() {
+        let task = Command(["-c", "import sys,json; print(json.dumps({'ok':True,'data':json.load(sys.stdin)}),flush=True)"], input: #"{"enabled":false,"name":"Agent rule"}"#)
+        var received = false
+        do {
+            try task.run(event: { message in received = (message["data"] as? [String: Any])?["name"] as? String == "Agent rule" }, end: { code in
+                assert(code == 0 && received, "Rule JSON must reach CLI stdin and then EOF")
+                testParentWatch()
+            })
+        } catch { fatalError(error.localizedDescription) }
+    }
+    static func testParentWatch() {
+        let task = Command(["-c", "import sys; print('{\"ok\":true,\"event\":\"ready\"}',flush=True); sys.stdin.read(); print('{\"ok\":true,\"event\":\"finished\"}',flush=True)"], keepInputOpen: true)
+        var finished = false
+        do {
+            try task.run(event: { message in
+                if message["event"] as? String == "ready" {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        assert(task.process.isRunning, "Parent-watch stdin must stay open while app runs")
+                        task.closeInput()
+                    }
+                }
+                if message["event"] as? String == "finished" { finished = true }
+            }, end: { code in
+                assert(code == 0 && finished, "Closing parent input must let runner finish orderly")
+                print("PASS: rule JSON stdin and parent-watch EOF lifecycle")
+                testFrameBoundaries()
+            })
+        } catch { fatalError(error.localizedDescription) }
+    }
+    static func testFrameBoundaries() {
+        let producer = #"""
+import json, signal, sys, time
+signal.signal(signal.SIGTERM, lambda *_: None)
+sys.stdout.write('x' * 1048577)
+sys.stdout.flush()
+time.sleep(0.1)
+print(json.dumps({'ok': True, 'event': 'control_finished', 'data': {'source': 'oversized-suffix'}}), flush=True)
+print(json.dumps({'ok': True, 'event': 'control_finished', 'data': {'source': 'genuine'}}), flush=True)
+print(json.dumps({'ok': False, 'event': 'sample', 'error': {'message': 'sample error must survive'}}), flush=True)
+for sequence in range(1000):
+    print(json.dumps({'ok': True, 'event': 'sample', 'data': {'sequence': sequence}}))
+sys.stdout.flush()
+"""#
+        let task = Command(["-u", "-c", producer])
+        var errors: [String] = []
+        var receipts: [String] = []
+        var lastSequence: Int?
+        do {
+            try task.run(event: { message in
+                if let error = message["error"] as? [String: Any], let text = error["message"] as? String { errors.append(text) }
+                let data = message["data"] as? [String: Any]
+                if message["event"] as? String == "control_finished", let source = data?["source"] as? String { receipts.append(source) }
+                if let sequence = data?["sequence"] as? Int { lastSequence = sequence }
+            }, end: { code in
+                assert(code == 0, "Protocol failure must still drain genuine restoration receipts")
+                assert(receipts == ["genuine"], "An oversized frame suffix must never become a receipt")
+                assert(errors.count == 2 && errors.last == "sample error must survive", "Protocol errors are bounded and sample errors cannot be coalesced")
+                assert(lastSequence == 999, "Latest sample must arrive before command completion")
+                print("PASS: bounded frames, preserved errors, genuine receipts and final sample ordering")
+                exit(0)
+            })
+        } catch { fatalError(error.localizedDescription) }
     }
 }
