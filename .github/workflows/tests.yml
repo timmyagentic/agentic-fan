@@ -1,14 +1,28 @@
 name: tests
-on: [push, pull_request]
+on:
+  push:
+    branches: ['codex/apple-silicon-dmg']
+    tags: ['v*']
+  pull_request:
+    branches: ['codex/apple-silicon-dmg']
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python: ['3.10', '3.12']
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
