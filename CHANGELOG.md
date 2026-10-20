@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+
+- Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
+
 - Add the public AgenticFan website with installation guidance, compatibility limits and deployment configuration.
 
 - Rename the product to AgenticFan and the repository to agentic-fan. The app, CLI, Python module, skill, configuration and Helper identifiers use the new name directly, without legacy aliases or migration.
