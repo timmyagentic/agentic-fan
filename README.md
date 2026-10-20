@@ -1,5 +1,7 @@
 # AgenticFan — Fan control for Mac. Built for agents.
 
+[项目官网](https://agenticfan.timmyagentic.si) · [网站源码与部署](website/README.md)
+
 提供温度监测、有限时长调速与可由 Agent 编辑的温度规则。面向 Apple Silicon，交付格式为 **DMG 内的 `AgenticFan.app`**，内含窗口、CLI 和所需运行时。用户不需要安装 Python，也不需要模型、API Key 或网络服务。
 
 **下一版 0.4.2（尚未发布）：修复原生界面持续监测时的内存增长。** 每轮读取后释放 JSON 临时对象；界面忙时合并待显示的采样，保留控制、错误与恢复回执的顺序。新增保持后台进程存活的 255 测点回放与物理内存回归测试，避免退出进程掩盖泄漏。详见[原生界面内存检查](docs/native-memory.md)和[更新记录](CHANGELOG.zh-Hans.md)。普通更新只升补丁号，协作与合并规则见 [AGENTS.md](AGENTS.md)。
