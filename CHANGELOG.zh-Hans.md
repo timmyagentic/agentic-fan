@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+
+- 项目官网统一为 timmyagentic 视觉风格，保留原有安装、下载与文档入口。
+
 - 增加项目官网、安装入口、版本与能力边界说明，以及独立的网站部署配置。
 
 - 产品正式命名为 AgenticFan，仓库缩短为 agentic-fan；应用、CLI、Python 模块、技能、配置与 Helper 标识直接统一使用新名称，不提供旧别名或迁移。
