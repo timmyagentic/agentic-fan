@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add the public AgenticFan website with installation guidance, compatibility limits and deployment configuration.
+
 - Rename the product to AgenticFan and the repository to agentic-fan. The app, CLI, Python module, skill, configuration and Helper identifiers use the new name directly, without legacy aliases or migration.
 
 The next release is **0.4.2**, following the latest published release, 0.4.1.
