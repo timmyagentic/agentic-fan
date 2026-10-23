@@ -2,7 +2,7 @@
 
 Source visual truth: https://timmyagentic.si/ (approved main-site design, personal-hub f4f67b0).
 
-Implementation: existing macfan product website. This is a visual-family adaptation with preserved product content, not a pixel-identical copy of the portfolio page.
+Implementation: existing AgenticFan product website. This is a visual-family adaptation with preserved product content, not a pixel-identical copy of the portfolio page.
 
 - Desktop viewport: 1205 x 1000 CSS pixels; content width 1190 including the browser's reserved scrollbar layout. Source and implementation viewport screenshots are both 1190 x 988 pixels. Both are normalized by the same browser capture behavior.
 - Mobile/narrow/tablet widths: 390, 320 and 768 CSS pixels; no horizontal document overflow.
