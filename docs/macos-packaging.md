@@ -55,6 +55,14 @@ python3 -m venv .venv
   --output dist/release
 ```
 
-此模式启用 hardened runtime，签名应用内部二进制和外层 bundle，分别提交应用与 DMG 公证并装订票据；成功后输出不含 `-dev` 的 DMG。只传 `--identity` 而没有公证配置时，产物名带 `-signed-unnotarized`。当前会话未执行正式签名或公证。
+此模式启用 hardened runtime，签名应用内部二进制和外层 bundle，分别提交应用与 DMG 公证并装订票据；成功后输出不含 `-dev` 的 DMG。只传 `--identity` 而没有公证配置时，产物名带 `-signed-unnotarized`。正式发布须同时提供签名、公证和装订验证证据，不能用开发构建替代。
 
 开发包可能被 Gatekeeper 拦截，不应被描述为已经具备正式分发体验。应在一台未参与构建的 Mac 上验收下载、安装、授权、Agent 调用和卸载流程。
+
+## 公开正式 Release
+
+正式安装使用公开 GitHub Release，不要求 GitHub 登录。`scripts/install-macos.sh` 默认通过公开 API 解析一次最新稳定 tag，再从该 tag 下载 `AgenticFan-<version>-arm64.dmg` 及同名 `.sha256`；验证失败即停止，不自动回退到 Actions。
+
+通过受保护 PR 与当前提交的测试、DMG 构建/隔离安装门禁后，在核验过的合并提交构建正式签名公证包。为相同提交创建 `v<version>` tag，再以非 prerelease 的 Latest Release 发布 DMG、校验文件、`.build.json`、安装脚本与指南。不要重写历史 tag 或 Release。
+
+发布后独立下载所有资产，核对 SHA-256、版本、签名、装订票据与 Gatekeeper；执行 `python3 packaging/macos/test_install.py --release` 验证匿名下载、临时用户目录安装、CLI/双 Agent skill、重复安装与模拟自动恢复。真实风扇写入和实际登录启动仍需独立授权与验收。
