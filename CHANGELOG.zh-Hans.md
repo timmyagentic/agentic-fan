@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 将 Clash Verge Monitor 官网入口切换到更名后的正式域名。
+
 - 将官网关联项目入口名称更新为 Clash Verge Monitor。
 
 - 修正网站视觉验收文档中残留的旧产品名称。
