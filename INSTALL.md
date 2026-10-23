@@ -10,18 +10,19 @@
 
 1. 确认执行机器是 **Apple Silicon、macOS 15+**。Linux 可以开发测试，不能把 Linux 上的模拟输出当作 Mac 安装成功。
 2. 检查当前是否已有 `agenticfan`。安装目标为 `~/Applications/AgenticFan.app`、`~/.local/bin/agenticfan`；Codex skill 位于 `~/.agents/skills/agenticfan`，Claude Code skill 位于 `~/.claude/skills/agenticfan`。
-3. 需要 GitHub 仓库访问权限。优先使用现有 `gh` 登录；通过 `gh api repos/timmyagentic/agentic-fan --jq .full_name` 验证。若未安装 `gh` 且已有 Homebrew，可执行 `brew install gh`。若缺少登录，让用户通过 `gh auth login` 的浏览器流程完成，不在聊天中索取 token 或密码。不要因未设置 `GH_TOKEN` 就假定缺少认证。
-4. 将此仓库克隆到新的临时目录，读取脚本后执行安装。不要覆盖用户已有的源码目录：
+3. 正式安装无需 GitHub 登录。匿名下载 [最新正式 Release](https://github.com/timmyagentic/agentic-fan/releases/latest) 中的安装脚本，阅读脚本后执行；不要覆盖用户已有的源码目录：
 
 ```sh
-agenticfan_checkout="$(mktemp -d "${TMPDIR:-/tmp}/agenticfan-setup.XXXXXXXX")"
-gh repo clone timmyagentic/agentic-fan "$agenticfan_checkout/repo" -- --depth 1
-bash "$agenticfan_checkout/repo/scripts/install-macos.sh" --agent codex
+agenticfan_setup="$(mktemp -d "${TMPDIR:-/tmp}/agenticfan-setup.XXXXXXXX")"
+curl --fail --location --proto '=https' \
+  https://github.com/timmyagentic/agentic-fan/releases/latest/download/install-macos.sh \
+  --output "$agenticfan_setup/install-macos.sh"
+# 阅读下载的脚本后执行：
+bash "$agenticfan_setup/install-macos.sh" --agent codex
 ```
 
-使用 `--agent claude` 或 `--agent both` 选择其他目标。若没有偏好，默认 Codex。脚本不需要 `sudo`、Python、Xcode 或本地编译；已有 Homebrew 也只是安装缺失的 `gh` 时才需要。
-
-5. 安装器会从仓库默认分支最近一次成功的 DMG 构建下载产物，核对 SHA-256、磁盘镜像及代码签名，再安装 App、CLI 和 skill。它会保留已有 shell 配置并添加 PATH；重复执行不会追加重复配置。冲突的自定义 CLI 或 skill 会被保留并明确报错。升级替换的旧 App 会保留为同目录下的 `AgenticFan.previous.*.app`。
+4. 使用 `--agent claude` 或 `--agent both` 选择其他目标。没有偏好时默认 Codex。安装不需要 `sudo`、Python、Xcode 或本地编译。
+5. 安装器只解析一次正式 Release 的 tag，随后固定同一版本下载 DMG 和 SHA-256。核对校验和、磁盘镜像、代码签名与 Gatekeeper 后安装 App、CLI 和 skill。它保留 shell 配置并添加 PATH；重复安装不会追加配置。自定义 CLI/skill 冲突会被保留并报错，旧 App 保留为同目录下的 `AgenticFan.previous.*.app`。
 6. 当前 Agent 进程的 PATH 不会随父 shell 配置自动更新。立即使用以下绝对路径验证；新登录 shell 可以直接使用 `agenticfan`：
 
 ```sh
@@ -46,13 +47,13 @@ Agent 可通过原生入口直接管理登录项，无需打开窗口。`status`
 
 ## 已下载的安装包
 
-已有 DMG 和同名 `.dmg.sha256` 文件时，可以离线安装，无需 GitHub CLI。Actions 下载包的根目录附带 `install-macos.sh`；源码仓库中的脚本位于 `scripts/`：
+已有 DMG 和同名 `.dmg.sha256` 文件时，可以离线安装，无需 GitHub CLI。正式 Release 与 Actions 下载包的根目录均附带 `install-macos.sh`；源码仓库中的脚本位于 `scripts/`：
 
 ```sh
-bash /absolute/path/install-macos.sh --dmg /absolute/path/AgenticFan-0.4.2-arm64-dev.dmg --agent both
+bash /absolute/path/install-macos.sh --dmg /absolute/path/AgenticFan-0.4.2-arm64.dmg --agent both
 ```
 
-为可重现安装，可使用 `--run-id ID` 固定到某次成功构建；安装器只接受本仓库的 push 或手动 DMG 构建，不会自动执行 PR 或其他仓库的产物。
+需要开发构建时显式传 `--run-id ID`，这一路径才需要已登录的 GitHub CLI。安装器只接受本仓库成功的 push 或手动 DMG 构建。开发包带 `-dev` 后缀且未经 Apple 公证，和默认正式安装路径分开。
 
 ## 验收与权限
 
@@ -62,6 +63,6 @@ bash /absolute/path/install-macos.sh --dmg /absolute/path/AgenticFan-0.4.2-arm64
 
 安装过程不做真实风扇写入，不配置免密 sudo，也不把模拟结果当作硬件验收。用户要求启用控扇时，以普通用户运行 `agenticfan helper install`，通过系统授权安装 root 持有的 Helper。之后的 `fans set` / `fans auto` 无需 sudo 或重复认证。GUI 首次控扇会执行同一步骤。`helper status` 检查版本与服务；`helper uninstall` 经管理员授权卸载。活动会话期间禁止安装/卸载。
 
-目前提供的是 **未经过 Apple 公证的开发版**。脚本不会关闭 Gatekeeper 或移除 quarantine。如果系统阻止启动，需要用户在 macOS 的“隐私与安全性”设置中处理该应用的授权；这是系统授权步骤，不能伪装成无条件无人值守安装。安装与监控不应要求管理员密码；首次安装或更新 Helper 需要管理员授权，日常控扇由后台服务执行。
+正式 Release 使用 Developer ID 签名和 Apple 公证；默认下载安装遇到 Gatekeeper 验证失败会停止，不安装该包。脚本保留系统安全设置和 quarantine。显式选择开发包时可能仍需用户通过 macOS 系统界面确认打开。安装与监控不应要求管理员密码；首次安装或更新 Helper 需要管理员授权，日常控扇由后台服务执行。
 
 用户取消系统授权、仓库不可访问或硬件接口不可用时，保留具体错误并报告已完成的部分，不把任务笼统标为成功。

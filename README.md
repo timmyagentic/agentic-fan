@@ -4,9 +4,9 @@
 
 提供温度监测、有限时长调速与可由 Agent 编辑的温度规则。面向 Apple Silicon，交付格式为 **DMG 内的 `AgenticFan.app`**，内含窗口、CLI 和所需运行时。用户不需要安装 Python，也不需要模型、API Key 或网络服务。
 
-**下一版 0.4.2（尚未发布）：修复原生界面持续监测时的内存增长。** 每轮读取后释放 JSON 临时对象；界面忙时合并待显示的采样，保留控制、错误与恢复回执的顺序。新增保持后台进程存活的 255 测点回放与物理内存回归测试，避免退出进程掩盖泄漏。详见[原生界面内存检查](docs/native-memory.md)和[更新记录](CHANGELOG.zh-Hans.md)。普通更新只升补丁号，协作与合并规则见 [AGENTS.md](AGENTS.md)。
+**0.4.2 更新：修复原生界面持续监测时的内存增长。** 每轮读取后释放 JSON 临时对象；界面忙时合并待显示的采样，保留控制、错误与恢复回执的顺序。新增保持后台进程存活的 255 测点回放与物理内存回归测试，避免退出进程掩盖泄漏。详见[原生界面内存检查](docs/native-memory.md)和[更新记录](CHANGELOG.zh-Hans.md)。普通更新只升补丁号，协作与合并规则见 [AGENTS.md](AGENTS.md)。
 
-**下一版 0.4.2：增加 Agent 可直接编辑的本地温度规则。** 预置 CPU ≥99°C 满速、≤95°C 持续 5 秒恢复自动，默认关闭；同一份 JSON 支持多条规则、最高/固定 RPM、热加载与版本冲突检查，CLI 分别反馈保存、载入、触发和转速确认。详见[温度规则与 Agent 配置](docs/temperature-rules.md)。
+**0.4.2 更新：增加 Agent 可直接编辑的本地温度规则。** 预置 CPU ≥99°C 满速、≤95°C 持续 5 秒恢复自动，默认关闭；同一份 JSON 支持多条规则、最高/固定 RPM、热加载与版本冲突检查，CLI 分别反馈保存、载入、触发和转速确认。详见[温度规则与 Agent 配置](docs/temperature-rules.md)。
 
 **菜单栏与登录启动。** 应用只在菜单栏驻留，不显示 Dock 图标；首次正常打开默认注册当前用户的登录项，可在设置关闭。启动时不弹出主窗口，通过菜单栏“打开主窗口”访问完整界面。已启用的温度规则会随应用恢复运行；只运行安装器或 CLI 不会注册登录项。
 
@@ -22,17 +22,17 @@ Agent 按 [INSTALL.md](INSTALL.md) 下载已构建的 DMG、校验安装包、�
 bash scripts/install-macos.sh --agent codex
 ```
 
-该命令需要先取得本仓库，并有可访问仓库的 `gh` 登录；也可以用 `--dmg PATH` 安装已下载的包。当前开发版尚未经过 Apple 公证，系统可能要求用户确认打开。下载安装包的入口见 [macOS DMG 构建记录](https://github.com/timmyagentic/agentic-fan/actions/workflows/macos-dmg.yml)。
+从 [最新正式 Release](https://github.com/timmyagentic/agentic-fan/releases/latest) 下载 `install-macos.sh`，阅读后执行 `bash install-macos.sh --agent codex`。默认安装匿名下载同一正式版的 DMG 与校验文件，不需要 GitHub 登录、Python 或本地编译；也支持 `--dmg PATH` 离线安装。
 
 ## 安装与运行
 
 DMG 构建目标为 **Apple Silicon、macOS 15+**。取得构建产物后：
 
-1. 打开 `AgenticFan-<version>-arm64-dev.dmg`，把 `AgenticFan.app` 拖入 `Applications`。
+1. 打开 `AgenticFan-<version>-arm64.dmg`，把 `AgenticFan.app` 拖入 `Applications`。
 2. 双击应用后，点击菜单栏 AgenticFan 图标查看概览；选择“打开主窗口”查看温度测点、风扇转速和模式。
 3. 选择风扇、目标 RPM 与持续秒数，点击设置；首次控扇时由 macOS 请求管理员授权安装 Helper，后续无需重复授权。也可以点击“全部恢复自动”。
 
-默认 CI 产物是 ad-hoc 签名的开发包，**未经 Apple 公证**，下载后可能被 Gatekeeper 拦截。正式分发需要 Developer ID 签名与公证；构建方法见 [macOS 打包说明](docs/macos-packaging.md)。仓库中的 Python 包仅用于开发，不是面向用户的安装包。
+正式 Release 使用 Developer ID 签名、Apple 公证与装订票据，安装器会验证镜像、校验和、应用签名与 Gatekeeper。Actions 仍提供带 `-dev` 的开发包，不能代替正式 Release；构建方法见 [macOS 打包说明](docs/macos-packaging.md)。仓库中的 Python 包用于开发。
 
 应用内置的 CLI 可直接供终端和 Agent 使用，默认输出 JSON，持续监控与控扇会话输出 NDJSON：
 
@@ -89,7 +89,7 @@ python3 -m agenticfan --demo fans
 
 成功输出的公共字段为 `schema_version`、`ok`、`simulated`、`timestamp`、`data`；错误输出用 `error` 提供稳定的 `code`、可读 `message` 和 `details`。机器调用应同时检查 `ok` 和进程退出码。`--help` 与 `--version` 为常规文本输出。
 
-读取的 `ok: true` 表示采集命令成功，不代表每个测点都有效。0.4.1 沿用 **JSON 协议 v2**：只有传感器 `status=ok` 时 `value` 才是可采用的数值，其余为 `null`；异常与零值保留在 `raw_value`。检查 `sensor_summary`、`partial`、每个传感器的 `reason` 和每个风扇的 `errors`。`doctor` 区分接口可读与数据可用，异常、待确认和不可用项有独立计数及警告。`control_available` 表示键、类型与范围具备调用条件，不等于通过真机验证。
+读取的 `ok: true` 表示采集命令成功，不代表每个测点都有效。0.4.2 沿用 **JSON 协议 v2**：只有传感器 `status=ok` 时 `value` 才是可采用的数值，其余为 `null`；异常与零值保留在 `raw_value`。检查 `sensor_summary`、`partial`、每个传感器的 `reason` 和每个风扇的 `errors`。`doctor` 区分接口可读与数据可用，异常、待确认和不可用项有独立计数及警告。`control_available` 表示键、类型与范围具备调用条件，不等于通过真机验证。
 
 Agent 建议流程与流式消费示例见 [docs/agent-interface.md](docs/agent-interface.md)。应用的“AI native”体现在可发现、可组合、带明确权限和生命周期的接口；这个 MVP 不包含聊天界面或自主温控模型。
 

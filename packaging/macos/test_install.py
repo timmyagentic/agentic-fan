@@ -24,8 +24,9 @@ def main():
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--dmg", type=Path)
     source.add_argument("--run-id")
+    source.add_argument("--release", action="store_true", help="Download the public stable Release without gh")
     args = parser.parse_args()
-    install_source = ["--dmg", args.dmg.resolve()] if args.dmg else ["--run-id", args.run_id]
+    install_source = ["--dmg", args.dmg.resolve()] if args.dmg else ["--run-id", args.run_id] if args.run_id else []
     with tempfile.TemporaryDirectory(prefix="agenticfan-install-test-") as temporary:
         work = Path(temporary)
         user = work / "user's directory with spaces"

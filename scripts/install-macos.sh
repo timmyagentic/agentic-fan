@@ -11,6 +11,7 @@ dmg=""
 work=""
 stage=""
 mounted=0
+official_release=0
 
 fail() { printf 'AgenticFan: %s\n' "$*" >&2; exit 1; }
 usage() {
@@ -24,7 +25,8 @@ Usage: bash scripts/install-macos.sh [options]
 
 Installs ~/Applications/AgenticFan.app, ~/.local/bin/agenticfan, and the Agent skill.
 Adds a managed PATH block to .zprofile and .bash_profile, backing up originals.
-Without --dmg, requires gh with access to timmyagentic/agentic-fan.
+By default downloads the public stable Release anonymously with curl.
+Only --run-id development builds require gh with repository access.
 Never changes fan settings, Gatekeeper configuration, or sudo permissions.
 USAGE
 }
@@ -69,14 +71,8 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 work="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/agenticfan-install.XXXXXXXX")"
 
-if [ -z "$dmg" ]; then
-  command -v gh >/dev/null || fail 'GitHub CLI is needed to download this private-repository artifact. Install gh, or use --dmg with an already downloaded package.'
-  if [ -z "$run_id" ]; then
-    branch="$(gh api "repos/$repository" --jq .default_branch)"
-    run_id="$(gh run list --repo "$repository" --workflow macos-dmg.yml --branch "$branch" \
-      --event push --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-  fi
-  [[ "$run_id" =~ ^[0-9]+$ ]] || fail 'No successful DMG build is available yet'
+if [ -z "$dmg" ] && [ -n "$run_id" ]; then
+  command -v gh >/dev/null || fail 'GitHub CLI is required only for --run-id development builds; omit --run-id to install the public Release.'
   run_info="$(gh api "repos/$repository/actions/runs/$run_id" \
     --jq '[.conclusion, .head_repository.full_name, .path, .event] | @tsv')"
   IFS=$'\t' read -r conclusion source_repo workflow event <<< "$run_info"
@@ -88,6 +84,24 @@ if [ -z "$dmg" ]; then
   images=("$work/package"/AgenticFan-*-arm64*.dmg)
   [ "${#images[@]}" -eq 1 ] || fail 'Expected exactly one Apple Silicon DMG in the artifact'
   dmg="${images[0]}"
+elif [ -z "$dmg" ]; then
+  command -v curl >/dev/null || fail 'curl is required to download the public Release'
+  /bin/mkdir "$work/package"
+  curl --fail --silent --show-error --location --retry 3 --proto '=https' \
+    --output "$work/release.json" "https://api.github.com/repos/$repository/releases/latest"
+  release_tag="$(/usr/bin/plutil -extract tag_name raw -o - "$work/release.json")"
+  draft="$(/usr/bin/plutil -extract draft raw -o - "$work/release.json")"
+  prerelease="$(/usr/bin/plutil -extract prerelease raw -o - "$work/release.json")"
+  [ "$draft" = false ] && [ "$prerelease" = false ] || fail 'Expected a published stable release'
+  [[ "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'Invalid stable release tag'
+  dmg_name="AgenticFan-${release_tag#v}-arm64.dmg"
+  dmg="$work/package/$dmg_name"
+  release_url="https://github.com/$repository/releases/download/$release_tag"
+  curl --fail --silent --show-error --location --retry 3 --proto '=https' \
+    --output "$dmg" "$release_url/$dmg_name"
+  curl --fail --silent --show-error --location --retry 3 --proto '=https' \
+    --output "$dmg.sha256" "$release_url/$dmg_name.sha256"
+  official_release=1
 fi
 
 [ -f "$dmg" ] && [ -f "$dmg.sha256" ] || fail 'Both the DMG and its .dmg.sha256 sidecar are required'
@@ -106,6 +120,7 @@ identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$source_ap
 [ "$identifier" = io.github.timmyagentic.agenticfan ] || fail 'Unexpected app bundle identifier'
 /usr/bin/codesign --verify --deep --strict "$source_app" >&2
 if ! /usr/sbin/spctl --assess --type execute "$source_app" >&2; then
+  [ "$official_release" -eq 0 ] || fail 'The public Release failed Gatekeeper verification; nothing was installed'
   printf 'AgenticFan: this development app is not Gatekeeper-approved. System security settings are unchanged; macOS may require user approval before launch.\n' >&2
 fi
 
