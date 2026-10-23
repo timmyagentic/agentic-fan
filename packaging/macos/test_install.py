@@ -44,6 +44,7 @@ def main():
         assert info["CFBundleExecutable"] == "AgenticFanUI", "Finder must launch the actual native app"
         assert info.get("LSUIElement") is True, "Installed app must remain a menu-bar accessory without a Dock icon"
         assert (executable.parent / "AgenticFanUI").is_file()
+        assert (user / "Applications/AgenticFan.app/Contents/Resources/LICENSE").read_bytes() == (ROOT / "LICENSE").read_bytes(), "Installed app must retain the project license"
         binary = user / ".local/bin/agenticfan"
         assert binary.resolve() == executable.resolve()
         for folder in (".agents", ".claude"):
