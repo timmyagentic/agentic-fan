@@ -135,3 +135,9 @@ python3 -m agenticfan --gui --demo
 窗口开发需要 macOS 15+ 和 Xcode Command Line Tools。先运行 `python3 packaging/macos/build_native.py`，再运行 `python3 -m agenticfan --gui`；`--demo` 显式使用模拟数据。SwiftUI/AppKit 界面位于 `native/`，通过原有 JSON CLI 监测和控制，不直接写 SMC。CLI 在不加载任何 UI 的情况下独立工作。
 
 测试覆盖实际 CLI 子进程、读取协议、混合类型解码、部分写入失败、实际 RPM 未响应、并发控制、过期恢复以及父进程 SIGTERM/SIGKILL 后的恢复。DMG 流程另外检查独立运行时、窗口演示启动、应用签名与挂载后运行。硬件测试结果应单独记录；CI 的 macOS 虚拟机也不能代表真实 Mac SMC。
+
+## 许可证
+
+本项目源码采用 [MIT License](LICENSE)。
+
+第三方代码保留原有版权与许可声明，详见 [第三方声明](agenticfan/THIRD_PARTY_NOTICES.md)。网站字体遵循各自的 [SIL Open Font License](website/public/brand/fonts/)。
