@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Update the related-project website link label to Clash Verge Monitor.
+
 - Correct the stale AgenticFan product name in website design QA documentation.
 
 - Add the project MIT license, retain it in the app and DMG, and document the separate third-party code and font licenses.
