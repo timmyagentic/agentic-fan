@@ -118,6 +118,10 @@ source_app="$work/mount/AgenticFan.app"
 [ -d "$source_app" ] || fail 'The DMG does not contain AgenticFan.app'
 identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$source_app/Contents/Info.plist")"
 [ "$identifier" = io.github.timmyagentic.agenticfan ] || fail 'Unexpected app bundle identifier'
+if [ "$official_release" -eq 1 ]; then
+  bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$source_app/Contents/Info.plist")"
+  [ "$bundle_version" = "${release_tag#v}" ] || fail 'Release app version does not match its tag; nothing was installed'
+fi
 /usr/bin/codesign --verify --deep --strict "$source_app" >&2
 if ! /usr/sbin/spctl --assess --type execute "$source_app" >&2; then
   [ "$official_release" -eq 0 ] || fail 'The public Release failed Gatekeeper verification; nothing was installed'

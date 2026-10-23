@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import plistlib
 import subprocess
 import sys
 import tempfile
@@ -16,7 +17,7 @@ REPOSITORY = "https://github.com/timmyagentic/agentic-fan"
 @unittest.skipUnless(sys.platform == "darwin" and platform.machine() == "arm64",
                      "The installer targets Apple Silicon macOS")
 class InstallerDownloadTests(unittest.TestCase):
-    def download(self, metadata):
+    def download(self, metadata, image=None):
         with tempfile.TemporaryDirectory(prefix="agenticfan-download-test-") as directory:
             work = Path(directory)
             tools = work / "bin"
@@ -26,7 +27,7 @@ class InstallerDownloadTests(unittest.TestCase):
             metadata_file.write_text(json.dumps(metadata))
             curl = tools / "curl"
             curl.write_text(f"#!{sys.executable}\n" + '''
-import json, os, pathlib, sys
+import hashlib, json, os, pathlib, sys
 args = sys.argv[1:]
 url = args[-1]
 with open(os.environ["DOWNLOAD_LOG"], "a") as log:
@@ -34,8 +35,12 @@ with open(os.environ["DOWNLOAD_LOG"], "a") as log:
 if url.endswith("/releases/latest"):
     content = pathlib.Path(os.environ["RELEASE_FIXTURE"]).read_text()
 elif url.endswith(".dmg.sha256"):
-    content = "0" * 64 + "  AgenticFan-0.4.2-arm64.dmg\\n"
+    digest = hashlib.sha256(pathlib.Path(os.environ["DMG_FIXTURE"]).read_bytes()).hexdigest() if os.environ.get("DMG_FIXTURE") else "0" * 64
+    content = digest + "  AgenticFan-0.4.2-arm64.dmg\\n"
 elif url.endswith(".dmg"):
+    if os.environ.get("DMG_FIXTURE"):
+        pathlib.Path(args[args.index("--output") + 1]).write_bytes(pathlib.Path(os.environ["DMG_FIXTURE"]).read_bytes())
+        sys.exit(0)
     content = "deliberately corrupt test image"
 else:
     sys.exit(91)
@@ -50,7 +55,8 @@ else:
             gh.chmod(0o755)
             user = work / "untouched user"
             env = dict(os.environ, PATH=f"{tools}:/usr/bin:/bin:/usr/sbin:/sbin",
-                       DOWNLOAD_LOG=str(log), RELEASE_FIXTURE=str(metadata_file))
+                       DOWNLOAD_LOG=str(log), RELEASE_FIXTURE=str(metadata_file),
+                       DMG_FIXTURE=str(image) if image else "")
             result = subprocess.run(["/bin/bash", str(ROOT / "scripts/install-macos.sh"),
                                      "--user-root", str(user)], env=env, capture_output=True,
                                     text=True, timeout=30)
@@ -80,3 +86,21 @@ else:
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Invalid stable release tag", result.stderr)
         self.assertEqual(len(requests), 1)
+
+    def test_release_bundle_version_must_match_tag_before_installation(self):
+        with tempfile.TemporaryDirectory(prefix="agenticfan-version-test-") as directory:
+            root = Path(directory)
+            contents = root / "payload" / "AgenticFan.app" / "Contents"
+            contents.mkdir(parents=True)
+            (contents / "Info.plist").write_bytes(plistlib.dumps({
+                "CFBundleIdentifier": "io.github.timmyagentic.agenticfan",
+                "CFBundleShortVersionString": "0.4.1",
+            }))
+            image = root / "mismatch.dmg"
+            subprocess.run(["/usr/bin/hdiutil", "create", "-quiet", "-srcfolder",
+                            str(root / "payload"), str(image)], check=True, timeout=30)
+            result, requests = self.download(
+                {"tag_name": "v0.4.2", "draft": False, "prerelease": False}, image)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Release app version does not match its tag", result.stderr)
+            self.assertEqual(len(requests), 3)
