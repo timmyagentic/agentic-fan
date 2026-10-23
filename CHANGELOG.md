@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.4.2 — 2026-10-23
+
+- Install the public stable Release anonymously, pin its downloads to one tag, and require Gatekeeper verification; retain explicit development builds and isolated installation checks.
+
 
 - Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
 
@@ -9,7 +13,7 @@
 
 - Rename the product to AgenticFan and the repository to agentic-fan. The app, CLI, Python module, skill, configuration and Helper identifiers use the new name directly, without legacy aliases or migration.
 
-The next release is **0.4.2**, following the latest published release, 0.4.1.
+Version **0.4.2** follows the previous release, 0.4.1.
 The earlier 0.5.0/0.5.1 development version labels were never published and are
 corrected here; existing release tags and historical measurements are unchanged.
 
