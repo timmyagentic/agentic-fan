@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add the project MIT license and document the separate third-party code and font licenses.
+
 ## 0.4.2 — 2026-10-23
 
 - Install the public stable Release anonymously, pin its downloads to one tag, and require Gatekeeper verification; retain explicit development builds and isolated installation checks.
