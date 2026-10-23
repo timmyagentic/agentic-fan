@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Point the Clash Verge Monitor website link to its renamed canonical domain.
+
 - Update the related-project website link label to Clash Verge Monitor.
 
 - Correct the stale AgenticFan product name in website design QA documentation.
