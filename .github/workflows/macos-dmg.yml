@@ -5,6 +5,7 @@ on:
   push:
     branches: ['codex/apple-silicon-dmg']
     paths:
+      - 'LICENSE'
       - 'agenticfan/**'
       - 'native/**'
       - 'packaging/macos/**'
@@ -18,6 +19,7 @@ on:
     branches: ['codex/apple-silicon-dmg']
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - 'LICENSE'
       - 'agenticfan/**'
       - 'native/**'
       - 'packaging/macos/**'

@@ -117,6 +117,8 @@ def main(argv=None):
         if not executable.is_file():
             raise RuntimeError("PyInstaller did not produce the expected application bundle")
         shutil.copy2(native, app / "Contents/MacOS/AgenticFanUI")
+        (app / "Contents/Resources").mkdir(exist_ok=True)
+        shutil.copy2(ROOT / "LICENSE", app / "Contents/Resources/LICENSE")
         # The OS must register the actual Cocoa executable, not an exec() trampoline.
         # Otherwise modern macOS rejects the status-item scene after Finder launch.
         info_path = app / "Contents/Info.plist"
@@ -138,6 +140,7 @@ def main(argv=None):
 
         staging = work / "image"
         staging.mkdir()
+        shutil.copy2(ROOT / "LICENSE", staging / "LICENSE")
         run("ditto", app, staging / "AgenticFan.app")
         (staging / "Applications").symlink_to("/Applications", target_is_directory=True)
         staged_dmg = work / dmg.name
@@ -161,6 +164,9 @@ def main(argv=None):
                 raise RuntimeError("DMG did not mount at the expected path")
             if not (mount / "Applications").is_symlink() or os.readlink(mount / "Applications") != "/Applications":
                 raise RuntimeError("DMG is missing the Applications installation link")
+            for notice in (mount / "LICENSE", mount / "AgenticFan.app/Contents/Resources/LICENSE"):
+                if notice.read_bytes() != (ROOT / "LICENSE").read_bytes():
+                    raise RuntimeError("Packaged project license does not match source")
             run("codesign", "--verify", "--deep", "--strict", mount / "AgenticFan.app")
             smoke(mount / "AgenticFan.app/Contents/MacOS/agenticfan", work)
         finally:
@@ -172,12 +178,13 @@ def main(argv=None):
         "artifact": dmg.name, "version": version, "architecture": "arm64", "minimum_macos": "15.0",
         "python": platform.python_version(), "pyinstaller": PyInstaller.__version__,
         "signing": "developer_id" if args.identity else "ad_hoc", "notarized": bool(args.notary_profile),
-        "verified": ["codesign", "hdiutil", "mounted_app", "bundled_cli", "demo_guardian", "demo_gui", "demo_temperature_quality", "demo_menu_bar_startup"],
+        "verified": ["project_license", "codesign", "hdiutil", "mounted_app", "bundled_cli", "demo_guardian", "demo_gui", "demo_temperature_quality", "demo_menu_bar_startup"],
         "hardware_verified": False, "sha256": digest,
     }
     dmg.with_suffix(".build.json").write_text(json.dumps(metadata, indent=2) + "\n")
     shutil.copy2(ROOT / "scripts/install-macos.sh", output / "install-macos.sh")
     shutil.copy2(ROOT / "INSTALL.md", output / "INSTALL.md")
+    shutil.copy2(ROOT / "LICENSE", output / "LICENSE")
     print(dmg)
     return 0
 
