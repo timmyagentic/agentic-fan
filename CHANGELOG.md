@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Standardize squash PR merging and automatic remote task-branch deletion while retaining local branches and worktrees for the existing archive workflow.
+
 ## 0.4.3 — 2026-10-25
 
 - Keep control confirmation tied to the current fan and requested RPM when a higher-priority rule replaces an active target.
