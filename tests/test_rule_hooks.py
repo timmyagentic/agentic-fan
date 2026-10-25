@@ -178,6 +178,42 @@ class HookTests(unittest.TestCase):
         self.assertEqual(state['hook']['last_result']['reason'], 'worker_start_failed')
         self.assertIsNone(state['error'])
 
+    def test_higher_target_does_not_inherit_previous_control_confirmation(self):
+        conf = config(hook={'program': '/not-executed'})
+        conf['rules'][0]['target_rpm'] = 5000
+        gpu = deepcopy(conf['rules'][0])
+        gpu.update(id='gpu-hot', sensor_group='gpu', target_rpm='max')
+        conf['rules'].append(gpu)
+        path = self.root / 'rules.json'; rules.save(path, conf)
+        runner = rules.Runner(path, True, FakeControl)
+        self.addCleanup(runner.hooks.close)
+        with patch.object(runner.hooks, 'submit') as submit:
+            runner.tick(sample(), 0)
+            runner.control.confirmed = True
+            higher = sample(mode='manual')
+            higher['sensors'].append({'id': 'gpu', 'status': 'ok', 'value': 100})
+            higher['temperature_overview'].append({'group': 'gpu', 'sensor_ids': ['gpu']})
+            state = runner.tick(higher, 1)
+            event = submit.call_args.args[1]
+        self.assertEqual(event['target_rpm'], 6550)
+        self.assertEqual(event['control_status'], 'restoring')
+        self.assertFalse(event['control_confirmed'])
+        self.assertFalse(state['control_confirmed'])
+
+    def test_timeout_stops_the_hook_child_process_group(self):
+        dispatcher = HookDispatcher(); self.addCleanup(dispatcher.close)
+        program = self.program('sleep 20 &\necho $! > child.pid\nwait')
+        dispatcher.submit({'program': program, 'timeout_seconds': .3},
+                          {'event_id': 'child-timeout', 'rule': {'id': 'cpu-hot'}})
+        self.wait_for(lambda: (self.root / 'child.pid').exists())
+        child = int((self.root / 'child.pid').read_text())
+        self.wait_for(lambda: dispatcher.status()['last_result'] is not None)
+        self.assertEqual(dispatcher.status()['last_result']['status'], 'timed_out')
+        def stopped():
+            stat = subprocess.run(['ps', '-o', 'stat=', '-p', str(child)], capture_output=True, text=True).stdout.strip()
+            return not stat or stat.startswith('Z')
+        self.wait_for(stopped)
+
 
 class LarkAdapterTests(unittest.TestCase):
     def test_default_dry_run_uses_explicit_identity_and_event_id_without_shell(self):
