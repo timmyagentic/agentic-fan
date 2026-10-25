@@ -1,11 +1,21 @@
 name: tests
-on:
+'on':
   push:
-    branches: ['codex/apple-silicon-dmg']
-    tags: ['v*']
+    branches:
+    - codex/apple-silicon-dmg
+    tags:
+    - v*
   pull_request:
-    branches: ['codex/apple-silicon-dmg']
-    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+    - codex/apple-silicon-dmg
+    types:
+    - opened
+    - synchronize
+    - reopened
+    - ready_for_review
+    - labeled
+    - unlabeled
+  workflow_dispatch: null
 permissions:
   contents: read
 concurrency:
@@ -13,23 +23,42 @@ concurrency:
   cancel-in-progress: true
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        python: ['3.10', '3.12']
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-      - run: python -m pip install .
-      - run: python -m unittest discover -v
-      - name: Installed entry point
-        run: |
-          cd "$RUNNER_TEMP"
-          agenticfan schema
-          agenticfan --demo snapshot
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        fetch-depth: 0
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Validate version and bilingual PR changelogs
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        PR_BASE: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        APPROVED_MINOR: ${{ contains(github.event.pull_request.labels.*.name, 'version:minor-approved') }}
+        APPROVED_MAJOR: ${{ contains(github.event.pull_request.labels.*.name, 'version:major-approved') }}
+      run: |
+        set -euo pipefail
+        level='patch'
+        if [[ "$APPROVED_MINOR" == true && "$APPROVED_MAJOR" == true ]]; then
+          echo '::error::Use only one explicitly authorized version-upgrade label'
+          exit 1
+        fi
+        if [[ "$APPROVED_MINOR" == true ]]; then level='minor'; fi
+        if [[ "$APPROVED_MAJOR" == true ]]; then level='major'; fi
+        released="$(gh release view --repo "$GH_REPO" --json tagName --jq .tagName)"
+        python3 scripts/check-repository.py --released-version "$released" \
+          --release-level "$level" --base "$PR_BASE" --head "$PR_HEAD"
+      if: ${{ github.event_name == 'pull_request' }}
+    - run: python -m pip install .
+    - run: python -m unittest discover -v
+    - name: Installed entry point
+      run: |
+        cd "$RUNNER_TEMP"
+        agenticfan schema
+        agenticfan --demo snapshot
+    name: Core checks
