@@ -15,12 +15,12 @@
 - `pyproject.toml`、`agenticfan/__init__.py`、当前版本说明与打包结果必须一致；CLI `--version`、app Info.plist 与 DMG 文件名由源码版本派生。JSON `SCHEMA_VERSION` 独立维护，不随产品补丁号机械升级。
 - 已发布 tag/Release 不重写。误填的未发布版本可以在 PR 中纠正并说明，历史测量记录保留原构建标识。
 - 每个 PR 更新 `CHANGELOG.md` 与 `CHANGELOG.zh-Hans.md` 的 `Unreleased`，分别提供英文和简体中文的对应记录。不要把未发布内容写成已经发布。准备正式发布时再整理版本段和日期。
-- PR 的 `Repository policy` 检查执行 `scripts/check-repository.py`，核对版本、授权升级级别和双语更新记录。该检查不发布任何内容。
+- PR 的 `Core checks` 检查执行 `scripts/check-repository.py`，核对版本、授权升级级别和双语更新记录。该检查不发布任何内容。
 
 ## 实现与验证
 
 - 行为变更先运行相关聚焦测试；稳定后、commit/push 前运行一次 `python3 -m unittest discover -v`。之后只在新增修改、失败或具体未解决风险出现时重跑相关检查，不机械重复全套。
-- 纯文档改动使用 `git diff --check`、链接/命令核对及仓库策略检查，无需在本地重复全套应用测试。CI 保留 Linux/macOS、Python 3.10/3.12 矩阵。
+- 纯文档改动使用 `git diff --check`、链接/命令核对及仓库策略检查，无需在本地重复全套应用测试。日常 CI 使用 Python 3.12 的 Linux Core checks；涉及应用或打包输入时另跑既有 arm64 macOS DMG 工作流。
 - 本地版本策略检查：`python3 scripts/check-repository.py --released-version "$(gh release view --json tagName --jq .tagName)"`。检查已提交 PR 的更新记录时追加 `--base <base-sha> --head HEAD`。
 - 有限时长模拟控制：`python3 -m agenticfan --demo fans set --fan all --rpm 3000 --duration 1`。必须读到结束回执、自动模式恢复确认和成功退出。
 - app、安装器、打包、依赖或版本变更必须在 **arm64 macOS** 构建真实 DMG：`python3 -m pip install -r packaging/macos/requirements.txt`，然后运行 `python3 packaging/macos/build.py --output dist/macos` 和 `python3 packaging/macos/test_install.py --dmg dist/macos/<实际文件名>.dmg`。使用隔离用户目录，不能覆盖真实配置。对应 CI 为 `macOS DMG / build`。
@@ -33,7 +33,7 @@
 - 参考 QuotaMonitor，默认分支必须通过 PR，禁止直接 push、强推和删除；所有 review 讨论在合并前处理并解决。独立维护者场景不机械要求另一个人的 approval。
 - GitHub Ruleset 的声明保存在 `.github/rulesets/default-branch.json`，应用后必须从 GitHub 回读核验。文件存在不代表远程保护已经启用；不要增加管理员 bypass。
 - 每个 PR 最多在创建时主动请求一次 Codex review；仓库已自动 review 时不再手动触发。逐条判断正确性、范围和实际价值，不把所有建议自动纳入本次任务；修复后用本地验证和 CI 闭环，不循环请求 review。不能修复的实质问题必须解释或列为阻塞，不能为合并而隐藏。
-- 合并前重新读取 PR 的 head/base SHA、非 Draft 状态、mergeability、未解决讨论及当前提交检查；要求 `Repository policy` 与四个 `test (<os>, <python>)` 全部成功。本地通过、旧提交绿灯、Draft 跳过或汇总为绿都不能代替当前提交的实际测试。
+- 合并前重新读取 PR 的 head/base SHA、非 Draft 状态、mergeability、未解决讨论及当前提交检查；要求 `Core checks` 成功；涉及应用、测试、打包或 CI 构建输入时，另核验当前 head 的 `macOS DMG / build` 实际成功。本地通过、旧提交绿灯、Draft 跳过或汇总为绿都不能代替当前提交的实际测试。
 - 改动影响 app、安装、打包、依赖、版本或 DMG 工作流时，还必须确认当前 PR 的 `macOS DMG / build` 实际成功；文档 PR 不把路径过滤后不存在的 DMG job 设为必需检查。`macos-dmg.yml` 的路径范围必须随打包输入同步维护。
 - 基线前进时先更新本任务分支并重新取得受影响检查，不能只因为旧 base 上有绿灯就合并。按用户已有授权执行合并；只允许 squash 合并；使用 `gh pr merge --squash --match-head-commit <已核验的完整 SHA>`，不使用 `--admin` 绕过门禁。仓库设置与 Ruleset 均禁止 merge commit 和 rebase 合并。
 - 合并后核验 PR 的 merged 状态、merge commit 与默认分支包含关系；只释放本任务 writer claim，不自动删除 worktree 或分支。
@@ -59,4 +59,11 @@
 - Only squash merging is allowed. Inspect the final diff, current head, review threads and actual verification results before an authorized merge. Resolve all review conversations and address substantive findings; zero mandatory approvals supports the single-maintainer workflow. Merge with `gh pr merge <PR> --squash --match-head-commit <verified-full-head-SHA>` and verify the merged state afterward.
 - Keep `delete_branch_on_merge = true` and verify that GitHub automatically removes the merged PR's remote task branch when eligible. Do not use `--delete-branch`, which also removes the local branch. Under Tingjun Workspace, completion only releases the writer claim; local branches and worktrees remain for the existing archive workflow.
 - The default-branch ruleset declaration is [`.github/rulesets/default-branch.json`](.github/rulesets/default-branch.json); repository merge and deletion settings are declared in [`.github/repository-settings.json`](.github/repository-settings.json). These files do not apply themselves. After an authorized configuration update, read back the GitHub repository settings, effective rules and any classic branch protection. Protect the actual default branch rather than assuming it is named `main`.
-- Preserve the existing CI workflows, trigger conditions, required checks, app bindings and strictness. Existing stronger protections and immutable release tags remain in force. An empty or legitimately path-filtered checks list does not prove application tests passed; report the checks actually run and mark unavailable verification `UNVERIFIED`. Follow this repository's existing verification requirements and use proportionate document/configuration checks for documentation changes.
+- Keep CI aligned with the minimal checks documented below. Workflow or required-check changes need explicit task authorization; preserve app bindings and strictness unless that change is authorized. Existing stronger protections and immutable release tags remain in force. An empty or legitimately path-filtered checks list does not prove application tests passed; report the checks actually run and mark unavailable verification `UNVERIFIED`. Follow this repository's existing verification requirements and use proportionate document/configuration checks for documentation changes.
+
+## Continuous integration
+
+- Daily CI is one Python 3.12 Linux `Core checks` job: version/bilingual changelog policy, the full Python suite and the installed CLI entry point.
+- Keep `macos-dmg.yml` as the artifact-producing arm64 macOS build/install workflow. Application, tests, packaging and CI build inputs trigger it; verify its actual current-head success for those changes. This workflow identity is part of the installer contract.
+- `Core checks` is the always-present required GitHub Actions context. A path-filtered DMG workflow is not a global required context. Verify skipped and absent jobs separately from real build results.
+- Keep signed releases, manual installation smoke checks and physical hardware acceptance separate.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Simplify daily CI to one Python version and one core gate while retaining the macOS DMG build and installation contract.
+
 - Standardize squash PR merging and automatic remote task-branch deletion while retaining local branches and worktrees for the existing archive workflow.
 
 ## 0.4.3 — 2026-10-25

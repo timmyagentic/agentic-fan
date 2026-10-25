@@ -13,7 +13,7 @@
 列出实际命令、结果与对应提交。未执行项写 `UNVERIFIED`。
 
 - 本地相关检查：
-- 当前 PR 提交的 Linux/macOS 测试与 Repository policy：
+- 当前 PR 提交的 Core checks 与适用的 macOS DMG 构建/安装检查：
 - DMG 构建和隔离安装（影响 app、依赖、版本、打包时必填）：
 - UI / 真机验证（如适用）：
 

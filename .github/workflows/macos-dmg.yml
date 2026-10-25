@@ -1,65 +1,68 @@
 name: macOS DMG
-
-on:
-  workflow_dispatch:
+'on':
+  workflow_dispatch: null
   push:
-    branches: ['codex/apple-silicon-dmg']
+    branches:
+    - codex/apple-silicon-dmg
     paths:
-      - 'LICENSE'
-      - 'agenticfan/**'
-      - 'native/**'
-      - 'packaging/macos/**'
-      - 'pyproject.toml'
-      - 'scripts/check-repository.py'
-      - 'scripts/install-macos.sh'
-      - 'INSTALL.md'
-      - 'tests/**'
-      - '.github/workflows/macos-dmg.yml'
+    - LICENSE
+    - agenticfan/**
+    - native/**
+    - packaging/macos/**
+    - pyproject.toml
+    - scripts/check-repository.py
+    - scripts/install-macos.sh
+    - INSTALL.md
+    - tests/**
+    - .github/workflows/macos-dmg.yml
+    - .github/workflows/tests.yml
   pull_request:
-    branches: ['codex/apple-silicon-dmg']
-    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+    - codex/apple-silicon-dmg
+    types:
+    - opened
+    - synchronize
+    - reopened
+    - ready_for_review
     paths:
-      - 'LICENSE'
-      - 'agenticfan/**'
-      - 'native/**'
-      - 'packaging/macos/**'
-      - 'pyproject.toml'
-      - 'scripts/check-repository.py'
-      - 'scripts/install-macos.sh'
-      - 'INSTALL.md'
-      - 'tests/**'
-      - '.github/workflows/macos-dmg.yml'
-
+    - LICENSE
+    - agenticfan/**
+    - native/**
+    - packaging/macos/**
+    - pyproject.toml
+    - scripts/check-repository.py
+    - scripts/install-macos.sh
+    - INSTALL.md
+    - tests/**
+    - .github/workflows/macos-dmg.yml
+    - .github/workflows/tests.yml
 permissions:
   contents: read
-
 concurrency:
   group: macos-dmg-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-
 jobs:
   build:
-    # Standard arm64 runner; macos-15-intel is a different image.
     runs-on: macos-15
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          architecture: arm64
-      - name: Install packaging tools
-        run: python -m pip install -r packaging/macos/requirements.txt
-      - name: Verify the application core
-        run: python -m unittest discover -v
-      - name: Build and test the app and disk image
-        run: python packaging/macos/build.py --output dist/macos
-      - name: Verify installation and Agent integration
-        run: python packaging/macos/test_install.py --dmg dist/macos/*.dmg
-      - uses: actions/upload-artifact@v4
-        with:
-          name: AgenticFan-Apple-Silicon-development-DMG
-          path: dist/macos/*
-          if-no-files-found: error
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        architecture: arm64
+    - name: Install packaging tools
+      run: python -m pip install -r packaging/macos/requirements.txt
+    - name: Verify the application core
+      run: python -m unittest discover -v
+    - name: Build and test the app and disk image
+      run: python packaging/macos/build.py --output dist/macos
+    - name: Verify installation and Agent integration
+      run: python packaging/macos/test_install.py --dmg dist/macos/*.dmg
+    - uses: actions/upload-artifact@v4
+      with:
+        name: AgenticFan-Apple-Silicon-development-DMG
+        path: dist/macos/*
+        if-no-files-found: error
