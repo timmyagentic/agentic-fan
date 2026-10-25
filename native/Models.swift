@@ -134,62 +134,6 @@ struct RuleHookRuntime: Decodable {
         return "上次\(label)" + (dropped > 0 ? "，已跳过 \(dropped) 个事件" : "")
     }
 }
-struct RuleHookDraft {
-    var enabled = false
-    var program = ""
-    var timeoutSeconds = 10.0
-
-    init() {}
-    init(document: String) throws {
-        let object = try JSONSerialization.jsonObject(with: Data(document.utf8))
-        guard let root = object as? [String: Any] else { throw Self.invalid("规则必须是 JSON 对象。") }
-        guard let hook = root["hook"], !(hook is NSNull) else { return }
-        let data = try JSONSerialization.data(withJSONObject: hook)
-        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let config = try decoder.decode(RuleHookConfiguration.self, from: data)
-        enabled = true; program = config.program; timeoutSeconds = config.timeoutSeconds ?? 10
-    }
-    func applying(to document: String) throws -> String {
-        guard var object = try JSONSerialization.jsonObject(with: Data(document.utf8)) as? [String: Any] else {
-            throw Self.invalid("规则必须是 JSON 对象。")
-        }
-        if enabled {
-            guard program.hasPrefix("/"), !program.contains("\0") else {
-                throw Self.invalid("尚未确定脚本文件位置，请重新读取。")
-            }
-            guard timeoutSeconds.isFinite, (0.1...60).contains(timeoutSeconds) else {
-                throw Self.invalid("超时时间需要在 0.1–60 秒之间。")
-            }
-            object["hook"] = ["program": program, "timeout_seconds": timeoutSeconds]
-        } else { object["hook"] = NSNull() }
-        return try ruleDocument(object)
-    }
-    private static func invalid(_ message: String) -> NSError {
-        NSError(domain: "AgenticFan", code: 2, userInfo: [NSLocalizedDescriptionKey: message])
-    }
-}
-enum RuleHookExamples {
-    static let event = #"""
-    {
-      "version": 1,
-      "event": "rule_triggered",
-      "event_id": "00000000-0000-4000-8000-000000000000",
-      "simulated": true,
-      "timestamp": 0,
-      "rule": {
-        "id": "cpu-hot", "sensor_group": "cpu",
-        "trigger_celsius": 100, "trigger_seconds": 10,
-        "release_celsius": 90, "release_seconds": 20,
-        "target_rpm": "max", "enabled": true
-      },
-      "temperature_celsius": 101.2,
-      "fan": 0,
-      "target_rpm": 4900,
-      "control_status": "active",
-      "control_confirmed": false
-    }
-    """#
-}
 func ruleNumber(_ value: Double) -> String {
     String(format: value.rounded() == value ? "%.0f" : "%.1f", value)
 }

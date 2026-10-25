@@ -23,6 +23,37 @@ def run(*args, **kwargs):
     return subprocess.run([str(arg) for arg in args], check=True, **kwargs)
 
 
+def hook_smoke(executable: Path, directory: Path, env):
+    with tempfile.TemporaryDirectory(prefix='hook-smoke-', dir=directory) as temporary:
+        _hook_smoke(executable, Path(temporary), env)
+    print('AGENTICFAN_HOOK_SMOKE_OK')
+
+
+def _hook_smoke(executable: Path, directory: Path, env):
+    config = directory / 'hook-check/rules.json'
+    def command(action, *arguments, source=None):
+        result = run(executable, '--demo', 'hook', action, '--config', config, *arguments,
+                     input=source, cwd=directory, env=env, capture_output=True, text=True, timeout=15)
+        message = json.loads(result.stdout)
+        assert message['ok'] and message['simulated']
+        return message['data']
+    document = command('show')
+    assert not config.parent.exists(), 'Hook discovery must not initialize files'
+    command('validate', '--stdin', source=document['script']['content'])
+    receipt = command('apply', '--stdin', '--if-revision', document['script']['revision'],
+                      '--if-rules-revision', document['settings']['rules_revision'], source=document['script']['content'])
+    assert receipt['script_saved'] and not receipt['document']['settings']['enabled']
+    assert command('validate')['valid']
+    state = command('status')
+    assert state['script']['revision'] == receipt['script_saved_revision']
+    assert not state['settings']['rules_enabled'] and 'content' not in state['script']
+    # The frozen runtime must supply its own AST checker; this interpreter is never run.
+    interpreter = directory / 'syntax-check/python3'
+    interpreter.parent.mkdir()
+    interpreter.write_text('#!/bin/sh\nexit 91\n'); interpreter.chmod(0o700)
+    assert command('validate', '--stdin', source=f'#!{interpreter}\npass\n')['syntax']['status'] == 'passed'
+
+
 def smoke(executable: Path, directory: Path, gui=True):
     """Exercise the bundled runtime outside the checkout, without system Python."""
     env = dict(os.environ, AGENTICFAN_DEMO_DIR=str(directory / "demo"),
@@ -41,6 +72,7 @@ def smoke(executable: Path, directory: Path, gui=True):
             raise RuntimeError("Packaged guardian did not confirm restoration")
         if "--demo" in arguments and not all(message["simulated"] for message in messages):
             raise RuntimeError("Packaged smoke test was not explicitly simulated")
+    hook_smoke(executable, directory, env)
     # Exercise rejection and presentation in the frozen app as well as source tests.
     # This file belongs exclusively to the explicitly simulated transport above.
     state_path = directory / "demo" / "state.json"
@@ -178,7 +210,7 @@ def main(argv=None):
         "artifact": dmg.name, "version": version, "architecture": "arm64", "minimum_macos": "15.0",
         "python": platform.python_version(), "pyinstaller": PyInstaller.__version__,
         "signing": "developer_id" if args.identity else "ad_hoc", "notarized": bool(args.notary_profile),
-        "verified": ["project_license", "codesign", "hdiutil", "mounted_app", "bundled_cli", "demo_guardian", "demo_gui", "demo_temperature_quality", "demo_menu_bar_startup"],
+        "verified": ["project_license", "codesign", "hdiutil", "mounted_app", "bundled_cli", "hook_file_workflow", "demo_guardian", "demo_gui", "demo_temperature_quality", "demo_menu_bar_startup"],
         "hardware_verified": False, "sha256": digest,
     }
     dmg.with_suffix(".build.json").write_text(json.dumps(metadata, indent=2) + "\n")

@@ -20,6 +20,7 @@ final class Monitor: ObservableObject {
     @Published var showDetails = false
     @Published var showRules = false
     @Published var showHooks = false
+    @Published var hookSaving = false
     @Published var rulesDraft = ""
     @Published var rulesPath = ""
     @Published var rulesEditorError: String?
@@ -66,6 +67,9 @@ final class Monitor: ObservableObject {
     var hasRunner: Bool { watch != nil }
     private func ruleArguments(_ action: String, _ rest: [String] = []) -> [String] {
         prefix + ["rules", action] + (rulesConfigPath.map { ["--config", $0] } ?? []) + rest
+    }
+    func hookArguments(_ action: String, _ rest: [String] = []) -> [String] {
+        prefix + ["hook", action] + (rulesConfigPath.map { ["--config", $0] } ?? []) + rest
     }
     var machine: String {
         if demo { return "演示设备 · 模拟数据" }
@@ -799,7 +803,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let model = Monitor.shared
-        if model.restoring || model.rulesStopping || model.rulesSaving { return .terminateCancel }
+        if model.restoring || model.rulesStopping || model.rulesSaving || model.hookSaving { return .terminateCancel }
         if model.busy && model.activeFanID == nil {
             let pending = NSAlert()
             pending.messageText = "后台服务操作尚未结束"

@@ -75,6 +75,41 @@ App默认在首次正常启动时开启登录自启。注册失败会在设置�
 
 独立worker串行运行，最多排队16项。超时范围0.1–60秒，默认10秒；退出非零、文件缺失、超时和队列满仅记录Hook状态，不暂停采样和控扇。满队列丢弃新事件，不无限堆积，不自动重试；`hook.last_result`、`queued`、`running`、`dropped`可用于诊断。输出丢弃，避免无限日志及泄露凭据；外部程序需要详细日志时自行管理。禁用规则、更换/移除Hook会取消等待和执行中的任务；退出时先恢复本运行器持有的控扇，再结束Hook及其同进程组子进程。此机制不是任意程序的沙箱；不支持自行脱离进程组长期驻留的Hook。
 
+## Agent 与界面共用的 Hook 接口
+
+0.4.4 的原生编辑器通过同一 CLI 读取、保存、检查草稿及刷新状态；文件路径、模板、权限和冲突规则均在共享核心。`agenticfan schema` 的 `hook_files` 提供字段、默认模板、错误码与语义，随安装包分发的 Skill 给出完整流程。
+
+| 命令 | 行为 |
+| --- | --- |
+| `hook show` | 返回默认/当前文件位置、内容、是否存在/可编辑/可执行、脚本修订与规则修订、启停设置和执行记录；不创建文件 |
+| `hook apply` | 校验并原子保存代码及执行权限，按显式选项更新 Hook 设置；默认保留原启停状态，不修改温度规则总开关 |
+| `hook validate` | 检查已保存文件，或用 `--stdin`/`--file` 检查草稿；不运行用户脚本 |
+| `hook status` | 返回文件元数据、校验结果、运行器状态和执行版本记录，不包含代码，也不创建文件 |
+
+四个命令都支持 `--config /absolute/rules.json`。当没有配置 Hook 时，默认文件为规则文件旁的 `hooks/threshold-hook.sh`。已有 Hook 默认选中其原文件；`--default` 显式选择默认文件，读取或仅保存它不会自动替换已配置的程序。
+
+`hook apply` 和 `hook validate` 的 `--stdin`/`--file` 接收 **UTF-8 脚本原文**，不是 JSON。先读到修订，再校验和应用：
+
+```sh
+agenticfan hook show
+agenticfan hook validate --file /absolute/draft.sh
+agenticfan hook apply --file /absolute/draft.sh \
+  --if-revision <script.revision> \
+  --if-rules-revision <settings.rules_revision>
+agenticfan hook validate
+agenticfan hook status
+```
+
+脚本修订是文件字节的 SHA-256，新文件使用字面量 `missing`；规则修订独立计算。内容写入和启用都要求这两个修订，防止旧内容覆盖其他编辑器或把另一份脚本误设为当前 Hook。显式启用时追加 `--enable --timeout-seconds 15 --wait 8`（按实际需求设置超时）；关闭使用 `hook apply --disable --if-rules-revision <revision>`，保留脚本文件和其他规则。`HOOK_CONFLICT`、`CONFIG_CONFLICT` 或 `HOOK_BUSY` 要求重新读取/合并/重试。
+
+`hook validate` 无输入时还检查文件存在、可执行权限和解释器可用性；有输入时检查草稿，并报告是否添加了默认 shebang。固定系统 sh/bash 使用不执行模式检查语法；Python使用当前CLI的AST解析器，其他语言明确返回 `syntax.status: unsupported`，不会调用任意解释器做检查。错误返回退出码2和`error.details.validation`；查看`issues`及`warnings`，不能把未支持的检查当成通过。shebang使用LF换行；`env`解释器依赖当前进程PATH，多参数需用`env -S`。检查不证明另一进程环境、外部依赖或业务动作成功。
+
+应用回执分别报告`script_saved`/`script_saved_revision`、`settings_saved`、`rules_revision`/`rules_generation`与`rules_loaded`。脚本和规则是两个文件，`HOOK_APPLY_PARTIAL`会保留已成功写入的事实并要求回读，不伪装成全部回滚。只保存代码不重写规则JSON；文件更新后，运行器处理下一个事件时读取最新代码。加载规则设置不等于执行了脚本，CLI不会为验证而降低温度阈值或直接试跑。
+
+执行回执包含`program`、`script_revision`、`script_revision_after`、起止时间、耗时、退出状态及`script_changed_during_execution`。监测进程停止后仍保留最后回执，退出时会更新被取消的执行结果。`hook status`将这些观测与当前文件对比，`last_observed_revision_matches_current`没有可比对证据时为null。前后观测不是不可变执行快照，外部编辑器仍可能竞争；版本一致也不表示业务动作成功，需同时查看`last_result.status`及程序自己的结果。无法追踪的超大/特殊可执行文件可缺少版本观测。
+
+`rules validate`仍负责规则JSON结构，脚本可执行性与语法由`hook validate`负责。合成事件的`simulated:true`只是输入标记，任意用户代码仍可执行真实动作；只有在相应动作已获授权时才安排实际试跑。
+
 ## Lark CLI 示例与试用参数
 
 [固定通知程序](../examples/lark-temperature-hook.py)从stdin读事件，再以参数数组调用`lark-cli im +messages-send`，事件ID作为`--idempotency-key`。它拒绝发送模拟事件，默认`dry_run:true`，检查CLI退出状态及成功信封，不输出鉴权材料。它只通知，不改变风扇。程序需要可用的Python3；将shebang配置为本机绝对解释器路径，可避免菜单栏App的PATH差异。

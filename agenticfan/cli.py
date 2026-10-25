@@ -76,6 +76,24 @@ def parser():
         if name == "run":
             command.add_argument("--parent-watch", action="store_true", help="stop and restore owned control when stdin closes")
             command.add_argument("--count", type=int, help="stop after this many one-second samples, then restore")
+    hook = commands.add_parser("hook", help="inspect, edit, validate and observe the shared Hook script")
+    hook_actions = hook.add_subparsers(dest="hook_action", required=True)
+    for name in ("show", "apply", "validate", "status"):
+        command = hook_actions.add_parser(name)
+        command.add_argument("--config", type=Path, help="temperature rules file whose Hook is selected")
+        command.add_argument("--default", action="store_true", help="select the managed default script without changing the active Hook")
+        if name in ("apply", "validate"):
+            source = command.add_mutually_exclusive_group()
+            source.add_argument("--stdin", action="store_true", help="read UTF-8 script content, not JSON, from stdin")
+            source.add_argument("--file", type=Path, help="read script content from this input file")
+        if name == "apply":
+            command.add_argument("--if-revision", help="script byte revision from hook show; required for content writes or enabling")
+            command.add_argument("--if-rules-revision", required=True, help="rules revision from hook show")
+            enabled = command.add_mutually_exclusive_group()
+            enabled.add_argument("--enable", dest="hook_enabled", action="store_const", const=True, default=None)
+            enabled.add_argument("--disable", dest="hook_enabled", action="store_const", const=False)
+            command.add_argument("--timeout-seconds", type=float, help="Hook timeout, 0.1 through 60 seconds")
+            command.add_argument("--wait", type=float, default=0, help="wait up to 10 seconds for rule settings, never execute the script")
     return root
 
 
@@ -153,6 +171,29 @@ def main(argv=None):
         args = parser().parse_args(raw_args)
         if args.command == "schema":
             emit(success(MANIFEST, args.demo))
+            return 0
+        if args.command == "hook":
+            from . import hook_files, rules
+            path = args.config.expanduser().absolute() if args.config else rules.default_path(args.demo, create_runtime=False)
+            content = None
+            if getattr(args, 'stdin', False):
+                content = sys.stdin.buffer.read(hook_files.MAX_BYTES + 1)
+            elif getattr(args, 'file', None):
+                with args.file.open('rb') as stream:
+                    content = stream.read(hook_files.MAX_BYTES + 1)
+            if args.hook_action == 'show':
+                data = hook_files.show(path, default=args.default)
+            elif args.hook_action == 'status':
+                data = hook_files.status(path, default=args.default)
+            elif args.hook_action == 'validate':
+                data = hook_files.validate(path, content, default=args.default)
+                if not data['valid']:
+                    raise AgenticFanError('HOOK_VALIDATION_FAILED', 'Hook validation failed. The script was not executed.', 2, validation=data)
+            else:
+                data = hook_files.apply(path, content, if_revision=args.if_revision,
+                                        if_rules_revision=args.if_rules_revision, enabled=args.hook_enabled,
+                                        timeout_seconds=args.timeout_seconds, default=args.default, wait=args.wait)
+            emit(success(data, args.demo))
             return 0
         if args.command == "doctor":
             from .doctor import diagnose

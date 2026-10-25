@@ -10,15 +10,21 @@ from pathlib import Path
 from .errors import AgenticFanError
 
 
-def runtime_directory(demo=False) -> Path:
+def runtime_directory(demo=False, create=True) -> Path:
     path = Path(os.environ.get("AGENTICFAN_DEMO_DIR", str(Path(tempfile.gettempdir()) / f"agenticfan-demo-{os.geteuid()}"))) if demo else Path("/var/run/agenticfan")
+    if create:
+        try:
+            path.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        except PermissionError:
+            raise AgenticFanError("PERMISSION_DENIED", "Fan control requires sudo.", 4) from None
     try:
-        path.mkdir(mode=0o700)
-    except FileExistsError:
-        pass
-    except PermissionError:
-        raise AgenticFanError("PERMISSION_DENIED", "Fan control requires sudo.", 4) from None
-    info = path.lstat()
+        info = path.lstat()
+    except FileNotFoundError:
+        if not create:
+            return path
+        raise
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
         raise AgenticFanError("UNSAFE_RUNTIME_DIRECTORY", "Runtime directory must be private and owned by the current effective user.", path=str(path))
     return path

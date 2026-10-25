@@ -3,6 +3,7 @@
 from . import SCHEMA_VERSION, __version__
 from .temperatures import POLICY, STATUSES
 from .rules import DEFAULT
+from .hook_files import TEMPLATE as HOOK_TEMPLATE, MAX_BYTES as HOOK_MAX_BYTES, EVENT_EXAMPLE
 
 MANIFEST = {
     "name": "agenticfan", "version": __version__, "schema_version": SCHEMA_VERSION,
@@ -142,4 +143,61 @@ MANIFEST["rules_configuration"] = {
             }},
         },
     },
+}
+
+_hook_selection = {
+    '--config': {'type': 'string', 'description': 'Rules JSON used to select the current Hook; same override/default as rules commands.'},
+    '--default': {'type': 'boolean', 'default': False, 'description': 'Select hooks/threshold-hook.sh beside the rules file; selecting alone does not replace the configured Hook.'},
+}
+_hook_input = {
+    '--stdin': {'type': 'boolean', 'description': 'Read raw UTF-8 script content, not JSON. Mutually exclusive with --file.'},
+    '--file': {'type': 'string', 'description': 'Input script content. This is not the script destination.'},
+}
+MANIFEST['commands'] += [
+    {'command': 'hook show', 'effect': 'read', 'stream': False, 'hardware_required': False,
+     'description': 'Discover script path/content, default template, independent script/rules revisions and execution evidence without creating files.',
+     'options': _hook_selection},
+    {'command': 'hook apply', 'effect': 'user_configuration_write', 'stream': False, 'hardware_required': False,
+     'description': 'Validate and atomically save the script with executable permissions. Preserve Hook enablement unless explicitly requested; never change global rules enablement or run the hook directly.',
+     'options': {**_hook_selection, **_hook_input,
+                 '--if-revision': {'type': 'string', 'description': 'Required for script writes or enabling: script.revision from hook show, including missing for first creation.'},
+                 '--if-rules-revision': {'type': 'string', 'required': True, 'description': 'settings.rules_revision from hook show; protects file selection and Hook settings.'},
+                 '--enable': {'type': 'boolean', 'description': 'Explicitly configure the selected script. Mutually exclusive with --disable.'},
+                 '--disable': {'type': 'boolean', 'description': 'Remove the Hook setting, retaining the script file and global rules state.'},
+                 '--timeout-seconds': {'type': 'number', 'minimum': 0.1, 'maximum': 60},
+                 '--wait': {'type': 'number', 'minimum': 0, 'maximum': 10, 'default': 0, 'description': 'Wait for rules settings loading, not for script execution.'}}},
+    {'command': 'hook validate', 'effect': 'read', 'stream': False, 'hardware_required': False,
+     'description': 'Check the saved file, or normalize/check draft content from stdin/file. Invalid checks return HOOK_VALIDATION_FAILED and exit 2. Never execute the Hook or its custom interpreter; unsupported syntax is reported explicitly.',
+     'options': {**_hook_selection, **_hook_input}},
+    {'command': 'hook status', 'effect': 'read', 'stream': False, 'hardware_required': False,
+     'description': 'Read script metadata (without content), validation, runner state and the last execution observations; does not initialize files.',
+     'options': _hook_selection},
+]
+MANIFEST['hook_files'] = {
+    'default_relative_path': 'hooks/threshold-hook.sh', 'default_content': HOOK_TEMPLATE,
+    'maximum_bytes': HOOK_MAX_BYTES, 'input_format': 'raw UTF-8 script; JSON is only the response envelope',
+    'revision': {'algorithm': 'sha256', 'scope': 'script file bytes', 'missing': 'missing',
+                 'unavailable': None, 'independent_rules_revision': 'settings.rules_revision'},
+    'show_fields': {'script': ['path', 'default_path', 'exists', 'editable', 'executable', 'revision', 'content', 'issue'],
+                    'settings': ['enabled', 'timeout_seconds', 'rules_enabled', 'rules_revision', 'configured_program', 'selected_program_is_configured'],
+                    'execution': ['runner_running', 'runner_status', 'settings_loaded', 'running', 'queued', 'dropped', 'last_result', 'last_observed_revision_matches_current']},
+    'validation_fields': ['valid', 'scope', 'path', 'revision', 'interpreter', 'syntax', 'issues', 'warnings', 'executed'],
+    'syntax_statuses': ['passed', 'failed', 'unsupported', 'unavailable'],
+    'apply_fields': ['saved', 'script_saved', 'script_saved_revision', 'settings_saved', 'rules_revision', 'rules_generation', 'rules_loaded', 'script_effect', 'validation', 'document'],
+    'errors': {'HOOK_CONFLICT': 'Script bytes changed; reload and merge.', 'CONFIG_CONFLICT': 'Rules settings or script selection changed; reload and merge.',
+               'HOOK_BUSY': 'Another cooperating writer is active; reload and retry.',
+               'HOOK_VALIDATION_FAILED': 'Inspect error.details.validation; no file was written by validation.',
+               'HOOK_APPLY_PARTIAL': 'Inspect script_saved/settings_saved and reload; two files are not one filesystem transaction.'},
+    'event_example': EVENT_EXAMPLE,
+    'semantics': [
+        'Only apply writes files. show/validate/status are read-only, including default discovery in demo mode.',
+        'New or shebang-free content receives #!/bin/sh. Default content performs no action. Reads do not create the default file.',
+        'Apply sets owner execute permission, checks both revisions, and preserves other temperature rules. Script-only apply does not rewrite the rules file.',
+        'Existing UTF-8 regular scripts are edited in place. Binary, linked and oversized files are not rewritten by the editor; --default offers an explicit alternative.',
+        'Syntax checking uses fixed system sh/bash in no-execution mode or the bundled Python AST parser. Other interpreters are never launched for validation and report unsupported syntax.',
+        'Interpreter resolution may depend on the calling process PATH. Validation does not prove external dependencies, business results or another process environment.',
+        'Execution receipts include program, script_revision, script_revision_after, timestamps and duration. These are byte observations around execution, not immutable snapshots; external editors can race.',
+        'last_observed_revision_matches_current is null without comparable evidence. True does not imply successful business actions; inspect last_result.status separately.',
+        'Changing an enabled script affects the next event processed by its runner; apply and validate never invoke it as a test. No shell command-string or privileged Helper execution is introduced.',
+    ],
 }

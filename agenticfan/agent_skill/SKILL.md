@@ -1,6 +1,6 @@
 ---
 name: agenticfan
-description: Install and operate AgenticFan on Apple Silicon Macs. Use for Mac temperature sensors, fan RPM, bounded fan control, restoring automatic mode, and diagnosing the AgenticFan app or CLI installation.
+description: Install and operate AgenticFan on Apple Silicon Macs. Use for Mac temperature sensors, fan RPM, bounded fan control, restoring automatic mode, custom temperature-rule Hook scripts, and diagnosing the AgenticFan app or CLI installation.
 ---
 
 # AgenticFan
@@ -49,6 +49,29 @@ Read current rules, prepare the requested JSON, run `rules validate --file /abso
 Read `rules status` afterward. Keep saved, loaded, running, active and `control_confirmed` distinct. Saving an enabled file does not start an absent runner. The native app owns its runner, including while only its menu bar remains; a standalone `rules run` is foreground and `--parent-watch` stops on stdin EOF. Keep consuming its output through `rules_finished`, `automatic_mode_verified: true` and exit code 0 when stopping. That flag covers this runner's outstanding writes; it does not claim other controllers are in auto. Do not start unobserved detached control processes or add launch agents without a user request.
 
 Rules consume only valid identified overview points, excluding unknown and calibration/reference readings. Missing/stale data or invalid JSON releases owned control. External manual control is not taken over; an external auto request pauses rules until explicit reapply/enable. The independent guardian uses a five-second heartbeat lease; no valid samples means no renewal. New app builds may require a system-authorized Helper update before activation. Never claim this is hardware thermal protection or that simulated tests prove real actuation.
+
+## Agent-editable Hook script files
+
+AgenticFan 0.4.4 adds `hook show`, `hook apply`, `hook validate` and `hook status`. Verify the installed version and `schema` first; upgrade the CLI/app/bundled skill together before using these commands. The native editor invokes these same CLI operations. Do not use GUI automation to edit the script when these commands are available.
+
+1. Run `agenticfan hook show` (optionally `--config /absolute/rules.json`). It returns `script.path`, `content`, `exists`, `editable`, `executable`, byte `revision`, and `settings.rules_revision`, enablement and timeout. For a new profile it reports the fixed `hooks/threshold-hook.sh` path beside the rules file and a no-action template without creating it. The missing-file revision is the literal `missing`. Existing UTF-8 scripts are edited at their original path. `--default` selects the managed file explicitly; selection alone does not switch an existing Hook.
+2. Edit the returned content or prepare a local draft. Input to `hook apply/validate --stdin` and `--file` is raw UTF-8 script code, **not JSON**. Preserve the user's intended interpreter and business logic. Shebang-free or empty drafts receive `#!/bin/sh`; save sets owner execute permission. Binary, linked and oversized files are not replaced as text; report their `script.issue` or use an explicitly requested default-file replacement.
+3. Run `hook validate --file /absolute/draft.sh` or `hook validate --stdin`. Validation never executes the Hook or its custom interpreter. Saved-file validation without input also checks existence, permissions and interpreter availability. Fixed system sh/bash use no-execution parsing; Python uses this CLI's AST grammar. Unsupported syntax is explicitly `syntax.status: unsupported`; inspect warnings, including environment-dependent interpreter lookup. Validation does not prove runtime dependencies, external-service access or business effects. Invalid checks return exit 2 with `error.details.validation`.
+4. Save with both observed revisions:
+
+```sh
+agenticfan hook apply --file /absolute/draft.sh \
+  --if-revision <script.revision> \
+  --if-rules-revision <settings.rules_revision>
+```
+
+`--stdin` can replace `--file`. This preserves existing Hook enablement and the global temperature-rule switch. If the user authorized activation, add `--enable --timeout-seconds 15 --wait 8`; use the user's requested timeout. Enabling an already saved file without changing content also requires both revisions. `hook apply --disable --if-rules-revision <revision>` removes the Hook setting but retains the file and other rules; no script revision is required for disabling without a content write. Do not turn on temperature rules implicitly. Editing an already enabled script changes the code used by the next event processed by the runner, even if its rules JSON is unchanged.
+
+On `HOOK_CONFLICT` or `CONFIG_CONFLICT`, reread, merge and retry; do not force-overwrite. `HOOK_BUSY` means another writer is active. Script and rule files are separate: `HOOK_APPLY_PARTIAL` reports exactly which writes succeeded; reread both instead of assuming rollback. The receipt includes `script_saved_revision`, `rules_revision`, `rules_generation`, `settings_saved` and `rules_loaded`. A settings load is not a script execution. Apply never runs a test event.
+
+5. Run `hook validate` against the saved file, then `hook status`. Status omits code, and returns validation, `execution.runner_running`, runner state, settings loading and `last_result`. Check `script.revision` against the apply receipt. `last_result` includes the program, exit result, timestamps, duration, and `script_revision`/`script_revision_after` observed around execution. `last_observed_revision_matches_current` is null without comparable evidence; true is not proof of business success or an immutable execution snapshot. External editors may race, and unsupported/large executables may have no revision observation. Report saved, validation, running and actual execution separately.
+
+Keep default scripts side-effect-free. Do not lower real temperature thresholds or execute an arbitrary Hook merely to test setup. A synthetic event flag is input data, not a sandbox; custom code can still perform real actions. Use only authorized destinations and actions when arranging an explicit end-to-end test. `rules validate` checks rule JSON structure; it does not replace `hook validate`.
 
 ## Control with user authorization
 

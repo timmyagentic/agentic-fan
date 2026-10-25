@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Share Hook file discovery, atomic writes, independent revision checks, non-executing validation and status between the native editor and new `hook show/apply/validate/status` CLI commands. Execution receipts report file revisions observed before and after execution and remain available after the runner stops; update the machine-readable contract and bundled Agent skill.
+
 - Make general-purpose threshold Hooks visible in the main window and menu bar, with a directly editable script file that starts as a no-op template. Save code without choosing a path or setting executable permissions; preserve existing text scripts, detect external edits, and show event JSON, timeout and execution status.
 - Retry unsuccessful first-launch login-item registration on a later launch while preserving explicit and system opt-outs; explain that login startup resumes saved rules and custom Hooks.
 

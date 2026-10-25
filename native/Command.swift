@@ -44,12 +44,14 @@ final class Command {
     private let output = Pipe()
     private let input: String?
     private let keepInputOpen: Bool
+    private let maximumFrameBytes: Int
     private var inputPipe: Pipe?
     private let inputLock = NSLock()
     private let delivery = CommandDelivery()
-    init(_ arguments: [String], input: String? = nil, keepInputOpen: Bool = false) {
+    init(_ arguments: [String], input: String? = nil, keepInputOpen: Bool = false, maximumFrameBytes: Int = 1_048_576) {
         self.input = input
         self.keepInputOpen = keepInputOpen
+        self.maximumFrameBytes = maximumFrameBytes
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--backend"), i + 1 < args.count {
             process.executableURL = URL(fileURLWithPath: args[i + 1])
@@ -86,7 +88,7 @@ final class Command {
         DispatchQueue.global(qos: .utility).async { [self] in
             var buffer = Data()
             var chunk = [UInt8](repeating: 0, count: 65536)
-            let maximumFrameBytes = 1_048_576
+            let maximumFrameBytes = self.maximumFrameBytes
             var protocolErrorReported = false
             var discardingOversizedFrame = false
             func rejectFrame() {
