@@ -20,10 +20,12 @@ import signal
 import tempfile
 import threading
 import time
+import uuid
 
 from .errors import AgenticFanError, invalid
 from .protocol import failure, success
 from .runtime import lock, runtime_directory
+from .rule_hooks import HookDispatcher, validate_hook
 
 MAX_BYTES = 65536
 GROUPS = {"cpu", "gpu", "memory", "storage", "wireless", "power", "battery", "neural", "system"}
@@ -49,8 +51,10 @@ def _number(value):
 
 
 def validate(config):
-    if not isinstance(config, dict) or set(config) != {"version", "enabled", "fan", "rules"}:
-        raise invalid("Rules require exactly version, enabled, fan and rules.")
+    fields = {"version", "enabled", "fan", "rules"}
+    if not isinstance(config, dict) or not fields <= set(config) or set(config) - fields - {"hook"}:
+        raise invalid("Rules require version, enabled, fan and rules, with optional hook.")
+    validate_hook(config.get("hook"))
     if type(config["version"]) is not int or config["version"] != 1:
         raise invalid("Unsupported rules version; expected 1.")
     if type(config["enabled"]) is not bool or type(config["fan"]) is not int or not 0 <= config["fan"] <= 9:
@@ -60,8 +64,8 @@ def validate(config):
     ids = set()
     for rule in config["rules"]:
         fields = {"id", "enabled", "sensor_group", "trigger_celsius", "release_celsius", "release_seconds", "target_rpm"}
-        if not isinstance(rule, dict) or set(rule) != fields:
-            raise invalid("Each rule requires exactly id, enabled, sensor_group, trigger_celsius, release_celsius, release_seconds and target_rpm.")
+        if not isinstance(rule, dict) or not fields <= set(rule) or set(rule) - fields - {"trigger_seconds"}:
+            raise invalid("Each rule requires id, enabled, sensor_group, trigger_celsius, release_celsius, release_seconds and target_rpm, with optional trigger_seconds.")
         name = rule["id"]
         if not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", name) or name in ids:
             raise invalid("Rule IDs must be unique, 1..64 letters, digits, underscores or hyphens.")
@@ -72,6 +76,9 @@ def validate(config):
         high, low, delay = (rule[k] for k in ("trigger_celsius", "release_celsius", "release_seconds"))
         if not all(_number(x) for x in (high, low, delay)) or not -40 <= low < high <= 150 or not 0 <= delay <= 300:
             raise invalid("Use finite release < trigger temperatures within -40..150 C and release_seconds from 0 through 300. These are plausibility bounds, not safe operating limits.")
+        trigger_delay = rule.get("trigger_seconds", 0)
+        if not _number(trigger_delay) or not 0 <= trigger_delay <= 300:
+            raise invalid("trigger_seconds must be finite and between 0 and 300 seconds.")
         rpm = rule["target_rpm"]
         if rpm != "max" and (type(rpm) is not int or not 1 <= rpm <= 16383):
             raise invalid("target_rpm must be 'max' or an integer RPM from 1 through 16383.")
@@ -190,12 +197,25 @@ class Evaluator:
     def __init__(self, config):
         self.config = validate(config)
         self.active = set()
+        self.hot_since = {}
         self.cool_since = {}
         self.last_sample = None
+
+    def reconfigure(self, config):
+        updated = validate(config)
+        same_owner = (self.config["fan"], self.config["enabled"]) == (updated["fan"], updated["enabled"])
+        previous = {rule["id"]: {"trigger_seconds": 0, **rule} for rule in self.config["rules"]}
+        unchanged = {rule["id"] for rule in updated["rules"]
+                     if same_owner and previous.get(rule["id"]) == {"trigger_seconds": 0, **rule}}
+        self.active.intersection_update(unchanged)
+        self.hot_since = {key: value for key, value in self.hot_since.items() if key in unchanged}
+        self.cool_since = {key: value for key, value in self.cool_since.items() if key in unchanged}
+        self.config = updated
 
     def evaluate(self, sample, now):
         # A gap cannot count as five continuously observed cool seconds.
         if self.last_sample is not None and now - self.last_sample > 3:
+            self.hot_since.clear()
             self.cool_since.clear()
         self.last_sample = now
         readings = {}
@@ -209,14 +229,23 @@ class Evaluator:
         enabled = [rule for rule in self.config["rules"] if self.config["enabled"] and rule["enabled"]]
         targets = []
         rule_states = []
+        triggered = []
         for rule in enabled:
             name, group = rule["id"], rule["sensor_group"]
             value = readings.get(group)
             if value is None:
                 self.active.discard(name)
+                self.hot_since.pop(name, None)
                 self.cool_since.pop(name, None)
-            elif name not in self.active and value >= rule["trigger_celsius"]:
-                self.active.add(name)
+            elif name not in self.active:
+                if value >= rule["trigger_celsius"]:
+                    self.hot_since.setdefault(name, now)
+                    if now - self.hot_since[name] >= rule.get("trigger_seconds", 0):
+                        self.active.add(name)
+                        triggered.append(name)
+                        self.hot_since.pop(name, None)
+                else:
+                    self.hot_since.pop(name, None)
             if name in self.active:
                 if value <= rule["release_celsius"]:
                     self.cool_since.setdefault(name, now)
@@ -236,8 +265,11 @@ class Evaluator:
                                   target_rpm=rpm, min_rpm=fan["min_rpm"], max_rpm=fan["max_rpm"])
                 targets.append(rpm)
             rule_states.append({"id": name, "value": value, "active": active,
+                                "hot_seconds": max(0, now - self.hot_since[name]) if name in self.hot_since else 0,
+                                "pending": name in self.hot_since,
                                 "cool_seconds": max(0, now - self.cool_since[name]) if name in self.cool_since else 0})
         return {"desired_rpm": max(targets) if targets else None, "active_rule_ids": sorted(self.active),
+                "triggered_rule_ids": triggered, "pending": bool(self.hot_since),
                 "cooling": bool(self.cool_since), "readings": readings, "rule_states": rule_states,
                 "readings_available": not enabled or any(readings.get(rule["sensor_group"]) is not None for rule in enabled)}
 
@@ -314,13 +346,21 @@ class Runner:
         self.pause = None
         self.automatic_verified = True  # No outstanding write owned by this runner.
         self.last_fan = None
+        self.hooks = HookDispatcher()
 
     def tick(self, sample, now, fresh=True):
         error = None
         try:
             doc = load(self.path)
             if self.document is None or doc.generation != self.document.generation:
-                self.document, self.evaluator = doc, Evaluator(doc.config)
+                if self.document and (self.document.config.get("hook") != doc.config.get("hook")
+                                      or not doc.config["enabled"]):
+                    self.hooks.cancel()
+                if self.evaluator is None:
+                    self.evaluator = Evaluator(doc.config)
+                else:
+                    self.evaluator.reconfigure(doc.config)
+                self.document = doc
                 self.pause = None
             config = self.document.config
             if fresh:
@@ -335,6 +375,7 @@ class Runner:
             config = None
             error = str(exc)
             self.document = self.evaluator = None
+            self.hooks.cancel()
         self.last_fan = next((fan for fan in sample.get("fans", [])
                               if fan["id"] == (config or {}).get("fan", getattr(self.control, "fan", -1))), None)
         if self.control and self.control.poll():
@@ -376,18 +417,41 @@ class Runner:
             state, error = "paused", "No valid identified temperature reading is available for the enabled rules."
         elif self.control:
             state = "cooling" if decision["cooling"] else "active"
+        elif decision.get("pending"):
+            state = "pending"
         else:
             state = "watching"
+        confirmed = bool(self.control and self.control.confirmed and config
+                         and self.control.fan == config["fan"]
+                         and self.control.rpm == decision["desired_rpm"]
+                         and not self.control.cancelled.is_set())
+        if config and not error:
+            for rule in config["rules"]:
+                if rule["id"] in decision.get("triggered_rule_ids", []):
+                    self.hooks.submit(config.get("hook"), {
+                        "version": 1, "event": "rule_triggered", "event_id": str(uuid.uuid4()),
+                        "timestamp": time.time(), "simulated": self.demo, "rule": rule,
+                        "temperature_celsius": decision["readings"].get(rule["sensor_group"]),
+                        "fan": config["fan"], "target_rpm": decision["desired_rpm"],
+                        "control_status": state, "control_confirmed": confirmed,
+                    })
         return {"enabled": bool(config and config["enabled"]), "status": state,
                 "config_path": str(self.path), "config": config,
                 "loaded_revision": self.document.revision if self.document else None,
                 "loaded_generation": self.document.generation if self.document else None,
                 **decision, "error": error or self.pause,
-                "control_confirmed": bool(self.control and self.control.confirmed),
+                "hook": self.hooks.status(),
+                "control_confirmed": confirmed,
                 "automatic_mode_verified": self.automatic_verified,
                 "control_active": self.control is not None}
 
     def stop(self, read_fans):
+        try:
+            return self._stop_control(read_fans)
+        finally:
+            self.hooks.close()
+
+    def _stop_control(self, read_fans):
         if not self.control:
             return self.automatic_verified
         control = self.control

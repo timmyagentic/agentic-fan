@@ -37,6 +37,11 @@ struct ModelTests {
         let config = try decoder.decode(RulesConfiguration.self, from: Data(document.utf8))
         assert(!config.enabled && config.rules.count == 2 && config.rules[0].targetRpm == .maximum && config.rules[1].targetRpm == .rpm(4200))
         assert(config.rules[0].summary.contains("99°C") && config.rules[0].summary.contains("95°C") && config.rules[0].summary.contains("5 秒"))
+        let delayedDocument = document.replacingOccurrences(of: "\"trigger_celsius\":99", with: "\"trigger_celsius\":99,\"trigger_seconds\":10")
+        let delayed = try decoder.decode(RulesConfiguration.self, from: Data(delayedDocument.utf8))
+        assert(delayed.rules[0].summary.contains("持续 10 秒"))
+        let hook = try decoder.decode(RuleHookRuntime.self, from: Data(#"{"running":false,"queued":0,"dropped":1,"last_result":{"status":"timed_out"}}"#.utf8))
+        assert(hook.summary == "上次 Hook：执行超时，已跳过 1 个事件")
         let edited = try ruleDocument(document, enabled: true)
         let preserved = try JSONSerialization.jsonObject(with: Data(edited.utf8)) as! [String: Any]
         assert(ruleDocumentEnabled(edited) == true && preserved["note"] as? String == "preserve me")

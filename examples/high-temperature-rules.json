@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "enabled": false,
+  "fan": 0,
+  "hook": null,
+  "rules": [
+    {"id": "cpu-hot", "enabled": true, "sensor_group": "cpu", "trigger_celsius": 100,
+     "trigger_seconds": 10, "release_celsius": 90, "release_seconds": 20, "target_rpm": "max"},
+    {"id": "gpu-hot", "enabled": true, "sensor_group": "gpu", "trigger_celsius": 95,
+     "trigger_seconds": 10, "release_celsius": 85, "release_seconds": 20, "target_rpm": "max"}
+  ]
+}
