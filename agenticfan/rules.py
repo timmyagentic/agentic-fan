@@ -421,6 +421,10 @@ class Runner:
             state = "pending"
         else:
             state = "watching"
+        confirmed = bool(self.control and self.control.confirmed and config
+                         and self.control.fan == config["fan"]
+                         and self.control.rpm == decision["desired_rpm"]
+                         and not self.control.cancelled.is_set())
         if config and not error:
             for rule in config["rules"]:
                 if rule["id"] in decision.get("triggered_rule_ids", []):
@@ -429,7 +433,7 @@ class Runner:
                         "timestamp": time.time(), "simulated": self.demo, "rule": rule,
                         "temperature_celsius": decision["readings"].get(rule["sensor_group"]),
                         "fan": config["fan"], "target_rpm": decision["desired_rpm"],
-                        "control_status": state, "control_confirmed": bool(self.control and self.control.confirmed),
+                        "control_status": state, "control_confirmed": confirmed,
                     })
         return {"enabled": bool(config and config["enabled"]), "status": state,
                 "config_path": str(self.path), "config": config,
@@ -437,7 +441,7 @@ class Runner:
                 "loaded_generation": self.document.generation if self.document else None,
                 **decision, "error": error or self.pause,
                 "hook": self.hooks.status(),
-                "control_confirmed": bool(self.control and self.control.confirmed),
+                "control_confirmed": confirmed,
                 "automatic_mode_verified": self.automatic_verified,
                 "control_active": self.control is not None}
 
