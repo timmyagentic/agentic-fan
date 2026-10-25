@@ -41,7 +41,40 @@ struct ModelTests {
         let delayed = try decoder.decode(RulesConfiguration.self, from: Data(delayedDocument.utf8))
         assert(delayed.rules[0].summary.contains("持续 10 秒"))
         let hook = try decoder.decode(RuleHookRuntime.self, from: Data(#"{"running":false,"queued":0,"dropped":1,"last_result":{"status":"timed_out"}}"#.utf8))
-        assert(hook.summary == "上次 Hook：执行超时，已跳过 1 个事件")
+        assert(hook.summary == "上次执行超时，已跳过 1 个事件")
+        let exampleEvent = try JSONSerialization.jsonObject(with: Data(RuleHookExamples.event.utf8)) as! [String: Any]
+        assert(exampleEvent["simulated"] as? Bool == true && exampleEvent["event"] as? String == "rule_triggered")
+        let sampleBytes = try JSONSerialization.data(withJSONObject: RuleHookExamples.samples)
+        print("HOOK_EXAMPLES_JSON:" + String(decoding: sampleBytes, as: UTF8.self))
+        var hookDraft = try RuleHookDraft(document: delayedDocument)
+        assert(!hookDraft.enabled)
+        hookDraft.enabled = true
+        hookDraft.program = "/Applications/A quoted app/notify"
+        hookDraft.timeoutSeconds = 15
+        let withHook = try hookDraft.applying(to: delayedDocument)
+        let hookConfig = try decoder.decode(RulesConfiguration.self, from: Data(withHook.utf8))
+        assert(hookConfig.hook?.program == hookDraft.program && hookConfig.hook?.timeoutSeconds == 15)
+        assert(!hookConfig.enabled && hookConfig.rules.count == 2 && hookConfig.rules[0].triggerSeconds == 10,
+               "Configuring a Hook must not enable or change temperature rules")
+        let hookObject = try JSONSerialization.jsonObject(with: Data(withHook.utf8)) as! [String: Any]
+        assert(hookObject["note"] as? String == "preserve me")
+        assert((hookObject["rules"] as? [[String: Any]])?.first?["note"] as? String == "keep rule fields")
+        let roundTrip = try RuleHookDraft(document: withHook)
+        assert(roundTrip.enabled && roundTrip.program == hookDraft.program && roundTrip.timeoutSeconds == 15)
+        for path in ["", "relative/script", "~/notify", "/tmp/a\0b"] {
+            var invalid = hookDraft; invalid.program = path
+            do { _ = try invalid.applying(to: document); fatalError("Accepted a non-executable-path command") }
+            catch { }
+        }
+        for timeout in [0.0, 60.1, Double.nan, Double.infinity] {
+            var invalid = hookDraft; invalid.timeoutSeconds = timeout
+            do { _ = try invalid.applying(to: document); fatalError("Accepted unbounded Hook timeout") }
+            catch { }
+        }
+        hookDraft.enabled = false
+        let withoutHook = try hookDraft.applying(to: withHook)
+        let disabledHook = try decoder.decode(RulesConfiguration.self, from: Data(withoutHook.utf8))
+        assert(disabledHook.hook == nil && disabledHook.rules[0].triggerSeconds == 10)
         let edited = try ruleDocument(document, enabled: true)
         let preserved = try JSONSerialization.jsonObject(with: Data(edited.utf8)) as! [String: Any]
         assert(ruleDocumentEnabled(edited) == true && preserved["note"] as? String == "preserve me")

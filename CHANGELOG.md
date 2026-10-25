@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Make general-purpose threshold Hooks visible in the main window and menu bar, with an executable/script picker, event JSON, Python/Shell templates, timeout, execution status and an editor that preserves other rules. Hook code can perform arbitrary user-defined actions; messaging is one example.
+- Retry unsuccessful first-launch login-item registration on a later launch while preserving explicit and system opt-outs; explain that login startup resumes saved rules and custom Hooks.
+
 - Simplify daily CI to one Python version and one core gate while retaining the macOS DMG build and installation contract.
 
 - Standardize squash PR merging and automatic remote task-branch deletion while retaining local branches and worktrees for the existing archive workflow.

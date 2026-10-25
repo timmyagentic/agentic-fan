@@ -19,6 +19,7 @@ final class Monitor: ObservableObject {
     @Published var mainWindowRequest: UInt = 0
     @Published var showDetails = false
     @Published var showRules = false
+    @Published var showHooks = false
     @Published var rulesDraft = ""
     @Published var rulesPath = ""
     @Published var rulesEditorError: String?
@@ -636,6 +637,7 @@ struct SurfaceSheets: ViewModifier {
             .sheet(isPresented: $model.showDetails) { DetailsView(model: model) }
             .sheet(isPresented: $model.showSettings) { ServiceSettings(model: model) }
             .sheet(isPresented: $model.showRules) { RulesSheet(model: model) }
+            .sheet(isPresented: $model.showHooks) { HookSheet(model: model) }
     }
 }
 
@@ -646,7 +648,11 @@ struct MainView: View {
             SummaryStrip(model: model)
             Divider()
             HStack(alignment: .top, spacing: 0) {
-                ScrollView { FanPanel(model: model).padding(16) }.frame(width: 285)
+                VStack(spacing: 0) {
+                    ScrollView { FanPanel(model: model).padding(16) }
+                    Divider()
+                    HookEntry(model: model).padding(14)
+                }.frame(width: 285)
                 Divider()
                 SensorsPanel(model: model).padding(16)
             }
@@ -664,7 +670,7 @@ struct MainView: View {
                 else if model.busy && !model.receipt.started { ProgressView().controlSize(.mini); Text(model.helperReady ? "正在准备调速…" : "等待系统认证…").font(.caption) }
                 Button("传感器详情", systemImage: "info.circle") { model.showDetails = true }.buttonStyle(.plain).foregroundStyle(.blue)
             }.padding(.horizontal, 16).frame(height: 30)
-        }.frame(width: 780, height: 375).background(Color(nsColor: .windowBackgroundColor))
+        }.frame(width: 780, height: 440).background(Color(nsColor: .windowBackgroundColor))
             .toolbar {
                 ToolbarItem(placement: .principal) { HStack { Text("AgenticFan").fontWeight(.semibold); Text(model.machine).foregroundStyle(.secondary) }.font(.system(size: 12)) }
                 ToolbarItem { Button("设置", systemImage: "gearshape") { model.showSettings = true } }
@@ -683,6 +689,7 @@ struct MenuPanel: View {
             }
             Divider()
             FanPanel(model: model, compact: true)
+            HookEntry(model: model)
             if model.busy && model.receipt.started && !model.receipt.restored {
                 TimelineView(.periodic(from: .now, by: 1)) { time in
                     let remaining = max(0, Int((model.receipt.deadline ?? time.date).timeIntervalSince(time.date)))
@@ -749,6 +756,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         LoginItemSettings.shared.configureDefault()
         Monitor.shared.start()
+        if CommandLine.arguments.contains("--demo") && CommandLine.arguments.contains("--show-main-window") {
+            DispatchQueue.main.async { self.showMain() }
+        }
         if CommandLine.arguments.contains("--startup-smoke") { verifyStartup() }
     }
     @objc func togglePopover(_ sender: Any?) {

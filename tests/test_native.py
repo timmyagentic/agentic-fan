@@ -51,6 +51,12 @@ class NativeTests(unittest.TestCase):
                     stdout, stderr = process.communicate(timeout=5)
                     self.fail(f"Native probe timed out. stdout={stdout!r}, stderr={stderr!r}\n{diagnostic}")
                 self.assertEqual(process.returncode, 0, stderr.decode(errors='replace'))
+                example_line = next(line for line in stdout.decode().splitlines() if line.startswith('HOOK_EXAMPLES_JSON:'))
+                examples = json.loads(example_line.partition(':')[2])
+                self.assertTrue(json.loads(examples[0])['simulated'])
+                compile(examples[1], '<native-hook-python-example>', 'exec')
+                shell = subprocess.run(['/bin/sh', '-n'], input=examples[2].encode(), capture_output=True)
+                self.assertEqual(shell.returncode, 0, shell.stderr.decode(errors='replace'))
 
     @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Native memory tests require the macOS Swift toolchain')
     def test_native_stream_memory_stays_bounded_with_slow_consumer(self):

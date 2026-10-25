@@ -55,6 +55,7 @@ final class LoginItemSettings: ObservableObject {
     private let service: LoginItemService
     private let preferences: LoginItemPreferences
     private let demo: Bool
+    private var defaultAttempted = false
 
     init(service: LoginItemService, preferences: LoginItemPreferences, demo: Bool) {
         self.service = service; self.preferences = preferences; self.demo = demo
@@ -64,21 +65,23 @@ final class LoginItemSettings: ObservableObject {
     var statusText: String {
         if demo { return "演示模式，不修改登录项。" }
         switch state {
-        case .enabled: return "已开启：登录后只在菜单栏运行。"
+        case .enabled: return "已开启：登录后在菜单栏恢复监测，并载入已保存的温度规则和自定义 Hook。"
         case .notRegistered: return "已关闭登录时自动启动。"
         case .requiresApproval: return "登录项已被系统关闭，请在系统设置中允许。"
-        case .notFound: return "macOS 未找到登录项，请从已安装的 AgenticFan.app 启动。"
+        case .notFound: return "尚未设置登录自启。开启后，登录时会自动恢复监测、温度规则和自定义 Hook。"
         }
     }
 
     func configureDefault() {
         guard !demo else { return }
         refresh()
-        guard !preferences.defaultApplied else { return }
-        // Apply the default once; later launches respect changes in System Settings.
-        preferences.defaultApplied = true
+        guard !preferences.defaultApplied, !defaultAttempted else { return }
+        defaultAttempted = true
+        // Failed registrations retry on the next launch, not on every refresh.
+        // Successful defaults and deliberate opt-outs remain persistent.
         // A main app without an existing BTM record can also report notFound.
         if state == .notRegistered || state == .notFound { setEnabled(true) }
+        else { preferences.defaultApplied = true }
     }
 
     func refresh() {
@@ -88,10 +91,10 @@ final class LoginItemSettings: ObservableObject {
 
     func setEnabled(_ enabled: Bool) {
         guard !demo else { return }
-        preferences.defaultApplied = true
+        if !enabled { preferences.defaultApplied = true }
         error = nil
         refresh()
-        if enabled && state == .enabled { return }
+        if enabled && state == .enabled { preferences.defaultApplied = true; return }
         if !enabled && (state == .notRegistered || state == .notFound) { return }
         do {
             if enabled { try service.register() }
@@ -101,6 +104,9 @@ final class LoginItemSettings: ObservableObject {
             self.error = "登录项更新失败：\(detail.localizedDescription)（\(detail.domain) \(detail.code)）"
         }
         refresh()
+        if enabled && (state == .enabled || state == .requiresApproval) {
+            preferences.defaultApplied = true
+        }
     }
 
     func command(_ operation: String) -> Bool {

@@ -54,6 +54,10 @@ struct LoginItemTests {
         fresh.configureDefault()
         assert(fresh.enabled && missingRecord.registrations == 1,
                "A main app without a BTM record still needs first-launch registration")
+        let legacy = FakeService(), legacyPreferences = FakePreferences()
+        legacy.current = .notFound; legacyPreferences.defaultApplied = true
+        LoginItemSettings(service: legacy, preferences: legacyPreferences, demo: false).configureDefault()
+        assert(legacy.registrations == 0, "An existing opt-out must not be silently re-enabled")
 
         for operation in ["status", "enable", "disable"] {
             assert(loginItemOperation(["--login-item", operation]) == operation)
@@ -70,7 +74,12 @@ struct LoginItemTests {
         let failed = LoginItemSettings(service: failing, preferences: attempted, demo: false)
         failed.configureDefault(); failed.configureDefault()
         assert(failing.registrations == 1 && failed.error != nil && !failed.enabled)
+        assert(!attempted.defaultApplied, "A failed registration must not consume the first-launch default")
         failing.fails = false
+        let nextLaunch = LoginItemSettings(service: failing, preferences: attempted, demo: false)
+        nextLaunch.configureDefault()
+        assert(nextLaunch.enabled && failing.registrations == 2 && attempted.defaultApplied,
+               "The next launch must retry an unsuccessful default registration")
         failed.setEnabled(true)
         assert(failed.enabled && failed.error == nil)
         let isolated = FakeService(), untouched = FakePreferences()
