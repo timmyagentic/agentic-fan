@@ -242,3 +242,39 @@ body.brand-site { background: var(--paper); color: var(--ink); font-family: var(
 @media (max-width: 760px) { .brand-cc .hero { display: block; } .brand-cc .hero-links { align-items: flex-start; margin-top: 24px; } }
 
 .brand-site .header-inner { display: flex; align-items: center; }
+
+/* Product captures and readable installation guidance. */
+.brand-site .product-tour { padding-top: 64px; }
+.brand-site .product-tour .section-intro { max-width: 680px; }
+.brand-site .app-preview { margin: 32px 0 0; }
+.brand-site .app-preview > a { display: block; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: #fff; box-shadow: 0 18px 42px #20314912; }
+.brand-site .app-preview img { display: block; width: 100%; height: auto; }
+.brand-site .app-preview figcaption { margin-top: 16px; color: var(--muted); font-size: 13px; line-height: 1.8; }
+.brand-site .app-preview figcaption a { text-decoration: underline; text-underline-offset: 3px; }
+.brand-site .install > div > p:not(.eyebrow):not(.release-note) { font-size: 15px; line-height: 1.85; }
+.brand-site .copy-card pre { font-size: 14px; line-height: 1.85; overflow-wrap: anywhere; }
+.brand-site .copy-top { gap: 14px; flex-wrap: wrap; }
+.brand-site .copy-top > span { font-size: 12px; }
+.brand-site .copy-button { min-height: 44px; padding: 10px 14px; font-size: 13px; }
+.brand-site .command summary { font-size: 14px; min-height: 44px; padding-block: 12px; }
+.brand-site .command pre { font-size: 13px; line-height: 1.8; }
+.brand-site .install-right .release-note { font-size: 13px; line-height: 1.85; }
+.brand-site .studio-footer { align-items: flex-start; }
+.brand-site .studio-footer-identity p { margin-top: 18px; }
+.brand-site .studio-footer-links { display: flex; flex-wrap: wrap; gap: 12px 22px; justify-content: flex-end; padding-top: 8px; }
+.brand-site .studio-footer-links a { font: 400 14px/1.7 var(--sans); letter-spacing: 0; padding-block: 7px; }
+@media (max-width: 760px) {
+  .brand-site .product-tour { padding-top: 44px; }
+  .brand-site .install > div > p:not(.eyebrow):not(.release-note), .brand-site .copy-card pre { font-size: 14px; }
+  .brand-site .install-right .release-note { font-size: 12px; }
+  .brand-site .studio-footer-links { justify-content: flex-start; padding-top: 0; }
+}
+
+/* Noto Sans SC supplements for the current website copy. */
+@font-face { font-family: "Studio Chinese"; font-style: normal; font-weight: 400; font-display: swap; src: url("/brand/fonts/chinese-extra-400.ttf") format("truetype"); unicode-range: U+67D3,U+6E32; }
+@font-face { font-family: "Studio Chinese"; font-style: normal; font-weight: 500; font-display: swap; src: url("/brand/fonts/chinese-extra-500.ttf") format("truetype"); unicode-range: U+67D3,U+6E32; }
+@font-face { font-family: "Studio Chinese"; font-style: normal; font-weight: 600; font-display: swap; src: url("/brand/fonts/chinese-extra-600.ttf") format("truetype"); unicode-range: U+67D3,U+6E32; }
+@font-face { font-family: "Studio Chinese"; font-style: normal; font-weight: 700; font-display: swap; src: url("/brand/fonts/chinese-extra-700.ttf") format("truetype"); unicode-range: U+67D3,U+6E32; }
+
+.brand-fan .native-preview > a { display: block; width: min(100%, 330px); margin-inline: auto; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: #fff; box-shadow: 0 22px 44px #20314915; }
+.brand-fan .native-preview img { display: block; width: 100%; height: auto; }
