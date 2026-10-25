@@ -1,0 +1,6 @@
+{
+  "cli": "/absolute/path/to/lark-cli",
+  "identity": "bot",
+  "chat_id": "REPLACE_WITH_APPROVED_CHAT_ID",
+  "dry_run": true
+}

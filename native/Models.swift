@@ -73,12 +73,14 @@ struct TemperatureRule: Decodable, Identifiable {
     let enabled: Bool
     let sensorGroup: String
     let triggerCelsius: Double
+    let triggerSeconds: Double?
     let releaseCelsius: Double
     let releaseSeconds: Double
     let targetRpm: RuleTarget
     var summary: String {
         let name = ["cpu": "CPU", "gpu": "GPU", "memory": "内存附近", "storage": "SSD", "wireless": "无线网络", "power": "电源管理"][sensorGroup] ?? sensorGroup
-        return "\(name) ≥\(ruleNumber(triggerCelsius))°C → \(targetRpm.title)；≤\(ruleNumber(releaseCelsius))°C 持续 \(ruleNumber(releaseSeconds)) 秒后解除"
+        let hold = (triggerSeconds ?? 0) > 0 ? " 持续 \(ruleNumber(triggerSeconds!)) 秒" : ""
+        return "\(name) ≥\(ruleNumber(triggerCelsius))°C\(hold) → \(targetRpm.title)；≤\(ruleNumber(releaseCelsius))°C 持续 \(ruleNumber(releaseSeconds)) 秒后解除"
     }
 }
 struct RulesConfiguration: Decodable {
@@ -99,10 +101,24 @@ struct RulesRuntime: Decodable {
     let automaticModeVerified: Bool?
     let controlConfirmed: Bool
     let controlActive: Bool?
+    let hook: RuleHookRuntime?
     var statusText: String {
-        ["disabled": "规则已关闭", "watching": "规则监测中", "active": "温度规则已触发", "cooling": "降温确认中", "restoring": "正在恢复系统自动", "paused": "规则已暂停", "error": "规则运行异常"][status] ?? status
+        ["disabled": "规则已关闭", "watching": "规则监测中", "pending": "高温持续确认中", "active": "温度规则已触发", "cooling": "降温确认中", "restoring": "正在恢复系统自动", "paused": "规则已暂停", "error": "规则运行异常"][status] ?? status
     }
     var mayOwnControl: Bool { controlActive == true || desiredRpm != nil || ["active", "cooling", "restoring"].contains(status) }
+}
+struct RuleHookRuntime: Decodable {
+    struct Result: Decodable { let status: String }
+    let running: Bool
+    let queued: Int
+    let dropped: Int
+    let lastResult: Result?
+    var summary: String? {
+        if running { return "Hook 正在执行（等待 \(queued) 项）" }
+        guard let result = lastResult else { return nil }
+        let label = ["succeeded": "执行成功", "failed": "执行失败", "timed_out": "执行超时", "cancelled": "已取消"][result.status] ?? result.status
+        return "上次 Hook：\(label)" + (dropped > 0 ? "，已跳过 \(dropped) 个事件" : "")
+    }
 }
 func ruleNumber(_ value: Double) -> String {
     String(format: value.rounded() == value ? "%.0f" : "%.1f", value)
