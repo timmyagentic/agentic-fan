@@ -1,6 +1,6 @@
 # 温度规则与 Agent 配置
 
-下一版 AgenticFan 0.4.2 使用一份用户本地 JSON，原生应用与 CLI 共用同一套校验和执行逻辑。默认路径为 `~/Library/Application Support/AgenticFan/rules.json`，`agenticfan rules show` 返回实际绝对路径、配置、修订号和运行状态。`--config PATH` 或环境变量 `AGENTICFAN_RULES_PATH` 可指定另一份配置。不存在的文件显示以下默认值，默认关闭：
+AgenticFan 使用一份用户本地 JSON，原生应用与 CLI 共用同一套校验和执行逻辑。默认路径为 `~/Library/Application Support/AgenticFan/rules.json`，`agenticfan rules show` 返回实际绝对路径、配置、修订号和运行状态。`--config PATH` 或环境变量 `AGENTICFAN_RULES_PATH` 可指定另一份配置。不存在的文件显示以下默认值，默认关闭：
 
 ```json
 {
@@ -21,7 +21,7 @@
 
 `fan` 是从零开始的实际风扇 ID。`target_rpm` 为 `"max"` 时，每次触发读取该风扇上报的最高转速，也可填范围内的整数 RPM。当前配置支持为一个风扇设置 1–16 条规则；多条触发时取较高目标。`sensor_group` 可选 CPU、GPU、内存、存储、无线、电源、电池、神经网络和系统对应的英文分组，完整枚举与 JSON Schema 在 `agenticfan schema` 的 `rules_configuration`。
 
-温度达到 `trigger_celsius` 即触发；只有持续观测到温度 ≤`release_celsius` 满 `release_seconds` 才释放，期间反弹或观测间隔超过 3 秒会重计时。恢复温度必须低于触发温度。配置温度的 −40～150°C 范围只是软件合理性校验，不是硬件安全范围。CPU/GPU 使用已识别、有效测点的最高值，不是封装温度或平均温度。未知、零值、异常、无返回及被排除的校准参考读数不能触发规则。
+温度达到 `trigger_celsius` 并持续 `trigger_seconds` 秒才触发（可选，0–300 秒，省略时保持旧版即时触发）；触发前跌回阈值以下、失效读数或采样间隔超过 3 秒都会重新计时。只有持续观测到温度 ≤`release_celsius` 满 `release_seconds` 才释放，期间反弹或观测间隔超过 3 秒会重计时。恢复温度必须低于触发温度。配置温度的 −40～150°C 范围只是软件合理性校验，不是硬件安全范围。CPU/GPU 使用已识别、有效测点的最高值，不是封装温度或平均温度。未知、零值、异常、无返回及被排除的校准参考读数不能触发规则。
 
 Agent 可直接编辑上述文件；建议先读取修订号，在工作目录准备 JSON，再校验与原子应用：
 
@@ -39,3 +39,26 @@ agenticfan rules status
 执行器热加载有效配置。非法文件或相关温度失效会释放本执行器持有的控制；修正后可重新读取。外部手动控制不会被接管；外部 `fans auto` 会暂停规则，显式重新应用或启用后才恢复。规则每次控扇仍通过既有 Helper/guardian 的有界会话；只有持续收到有效样本才发送心跳，独立 guardian 的 5 秒租约到期会尝试并读回自动模式。总会话仍有 3600 秒上限，到期后温度条件仍成立可开始下一次会话。退出、断开和故障时只恢复本执行器持有的控制，不修改其他控制器的手动状态。
 
 新构建首次启用前可能需要通过系统管理员认证更新 Helper。应用退出会等待 `rules_finished`、`automatic_mode_verified: true` 和退出码 0；未确认时保留恢复提示。上述恢复是软件尽力保证，不能覆盖 guardian/kernel 故障或其他软件竞争，也不是硬件热保护。
+
+
+## 固定程序 Hook
+
+在配置顶层增加 `"hook": {"program": "/absolute/path/to/executable", "timeout_seconds": 10}`；省略或设为 `null` 时关闭。路径必须为受信任本机可执行文件的绝对路径；不接受shell命令串，不插值参数，不使用root Helper运行。程序以当前用户执行，工作目录为程序父目录，继承用户环境但清除冻结Python运行时变量。程序可使用自身已有的Lark CLI登录态，不在规则文件中保存凭据。
+
+每条规则由未触发变为激活时，stdin收到一行JSON，例如：
+
+```json
+{"version":1,"event":"rule_triggered","event_id":"4a34bc92-10ac-431b-8369-a9f0660af3fd","timestamp":1792911600,"simulated":false,"rule":{"id":"cpu-hot","enabled":true,"sensor_group":"cpu","trigger_celsius":100,"trigger_seconds":10,"release_celsius":90,"release_seconds":20,"target_rpm":"max"},"temperature_celsius":101.2,"fan":0,"target_rpm":4900,"control_status":"active","control_confirmed":false}
+```
+
+事件表达温度条件成立，不代表已达到目标RPM；外部控制占用时也可通知，此时`control_status`为`paused`。每次激活只执行一次，相同内容重写配置不重复通知。真实修改该规则后重新计时，其他未变规则保留状态。重启运行器或采样失效后重新满足完整条件会产生新事件；本期不承诺跨重启exactly-once投递。
+
+独立worker串行运行，最多排队16项。超时范围0.1–60秒，默认10秒；退出非零、文件缺失、超时和队列满仅记录Hook状态，不暂停采样和控扇。满队列丢弃新事件，不无限堆积，不自动重试；`hook.last_result`、`queued`、`running`、`dropped`可用于诊断。输出丢弃，避免无限日志及泄露凭据；外部程序需要详细日志时自行管理。禁用规则、更换/移除Hook会取消等待和执行中的任务；退出时先恢复本运行器持有的控扇，再结束Hook及其同进程组子进程。此机制不是任意程序的沙箱；不支持自行脱离进程组长期驻留的Hook。
+
+## Lark CLI 示例与试用参数
+
+[固定通知程序](../examples/lark-temperature-hook.py)从stdin读事件，再以参数数组调用`lark-cli im +messages-send`，事件ID作为`--idempotency-key`。它拒绝发送模拟事件，默认`dry_run:true`，检查CLI退出状态及成功信封，不输出鉴权材料。它只通知，不改变风扇。程序需要可用的Python3；将shebang配置为本机绝对解释器路径，可避免菜单栏App的PATH差异。
+
+把程序复制到固定本机路径，并将[配置样例](../examples/lark-temperature-hook.example.json)复制为程序旁同名`.json`。填写Lark CLI绝对路径、明确的`user`或`bot`身份、已确认的`chat_id`或`user_id`（二选一），测试请求后再显式关闭dry_run。账户认证由Lark CLI管理，App不内置飞书能力。使用真实接收人和身份前先确认授权；本仓库示例不包含收件人或凭据。
+
+[高温规则样例](../examples/high-temperature-rules.json)为CPU≥100°C或GPU≥95°C持续10秒才触发最高转速；分别≤90°C/≤85°C持续20秒解除，所有活动规则解除后恢复系统自动。样例默认关闭、无Hook；这是可调整的试用策略，不是Apple温度上限或通用散热策略。

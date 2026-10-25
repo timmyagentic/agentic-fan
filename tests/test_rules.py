@@ -206,18 +206,22 @@ class RulesTransportTests(unittest.TestCase):
             if process.poll() is None:
                 process.kill(); process.communicate()
 
-    def test_live_rule_triggers_maximum_then_releases_after_five_cool_seconds(self):
+    def test_live_rule_waits_for_high_temperature_notifies_once_and_restores(self):
         from unittest.mock import patch
         from agenticfan.demo import demo_hardware
         with patch.dict(os.environ, self.env):
             hw = demo_hardware()
             hw.smc.write("TCDX", struct.pack("<f", 100))
-            rules.save(self.path, config())
+            hook = Path(self.temp.name) / 'notify'
+            hook.write_text('#!/bin/sh\ncat >> events.jsonl\n'); hook.chmod(0o700)
+            conf = config(hook={'program': str(hook)})
+            conf['rules'][0]['trigger_seconds'] = 2
+            rules.save(self.path, conf)
             process = subprocess.Popen(self.base + ["rules", "run", "--config", str(self.path), "--parent-watch"],
                                        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                        cwd=self.root, env=self.env)
             try:
-                deadline = time.monotonic() + 7
+                deadline = time.monotonic() + 9
                 while time.monotonic() < deadline:
                     live = rules.status(self.path)
                     if live.get("control_confirmed"):
@@ -227,6 +231,9 @@ class RulesTransportTests(unittest.TestCase):
                     self.fail("rule did not confirm simulated maximum RPM")
                 self.assertEqual(hw.fans()[0]["target_rpm"], 6200)
                 self.assertEqual(hw.fans()[0]["mode"], "manual")
+                events = (Path(self.temp.name) / 'events.jsonl').read_text().splitlines()
+                self.assertEqual(len(events), 1)
+                self.assertTrue(json.loads(events[0])['simulated'])
                 hw.smc.write("TCDX", struct.pack("<f", 94))
                 time.sleep(1.5)
                 self.assertEqual(hw.fans()[0]["mode"], "manual", "released before five observed seconds")
@@ -240,6 +247,7 @@ class RulesTransportTests(unittest.TestCase):
                 process.stdin.close(); process.stdin = None
                 _, err = process.communicate(timeout=5)
                 self.assertEqual(process.returncode, 0, err)
+                self.assertEqual(len((Path(self.temp.name) / 'events.jsonl').read_text().splitlines()), 1)
             finally:
                 if process.poll() is None:
                     process.terminate(); process.communicate(timeout=5)
