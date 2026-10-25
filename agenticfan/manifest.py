@@ -90,7 +90,7 @@ MANIFEST = {
                   {"properties": {"ok": {"const": False}}, "required": ["error"]}]
     },
     "semantics": {
-        "temperature_rules": "One local JSON configuration shared by CLI and native app. Rules start disabled. Only identified ok points included in temperature_overview can trigger; calibration/reference rows are excluded. Multiple rules target one selected fan and choose the highest active RPM. Restore after continuously observed release_seconds below release_celsius; missing/stale data releases owned control. A five-second guardian heartbeat lease expires if the runner stalls. External auto requests pause rules until explicit config reapply. The runner lifetime is the native app (closing its window keeps it running) or a foreground rules run command; saving alone never starts a runner.",
+        "temperature_rules": "One local JSON configuration shared by CLI and native app. Rules start disabled. Optional trigger_seconds requires continuously observed high readings (default 0); optional hook receives one asynchronous user-process rule_triggered JSON event per activation. Hooks never run as root, do not retry, and cannot pause fan control. Only identified ok points included in temperature_overview can trigger; calibration/reference rows are excluded. Multiple rules target one selected fan and choose the highest active RPM. Restore after continuously observed release_seconds below release_celsius; missing/stale data releases owned control. A five-second guardian heartbeat lease expires if the runner stalls. External auto requests pause rules until explicit config reapply. The runner lifetime is the native app (closing its window keeps it running) or a foreground rules run command; saving alone never starts a runner.",
         "rules_receipts": "saved means persisted, loaded means a live runner observed this exact file generation, active/cooling means a rule requests control, and control_confirmed means observed RPM reached tolerance. rules status is stale after four seconds without a heartbeat. rules_finished automatic_mode_verified only covers outstanding writes owned by this runner, not other controllers.",
         "sensor_labels": "Additive display_name/group/group_name/label_status/label_source/label_note fields. Original id and name stay unchanged. community_mapping is chip-scoped; system_name translates IOHID Product. label_verified remains false; neither source proves physical calibration or a physical core number.",
         "temperature_overview": "Per identified group, the maximum of currently valid mapped points, with contributing IDs and value_sensor_id. Unknown and calibration rows are excluded. This is not a package sensor or an average. Missing valid data returns null.",
@@ -120,6 +120,12 @@ MANIFEST["rules_configuration"] = {
         "properties": {
             "version": {"const": 1}, "enabled": {"type": "boolean"},
             "fan": {"type": "integer", "minimum": 0, "maximum": 9},
+            "hook": {"description": "Optional user executable receiving one rule_triggered JSON event on stdin. No shell; no root execution; no automatic retries.",
+                     "oneOf": [{"type": "null"}, {"type": "object", "additionalProperties": False,
+                       "required": ["program"], "properties": {
+                           "program": {"type": "string", "pattern": "^/", "description": "Absolute executable path. Runs as the current user, with its parent directory as cwd."},
+                           "timeout_seconds": {"type": "number", "minimum": 0.1, "maximum": 60, "default": 10},
+                       }}]},
             "rules": {"type": "array", "minItems": 1, "maxItems": 16, "items": {
                 "type": "object", "additionalProperties": False,
                 "required": ["id", "enabled", "sensor_group", "trigger_celsius", "release_celsius", "release_seconds", "target_rpm"],
@@ -128,6 +134,7 @@ MANIFEST["rules_configuration"] = {
                     "enabled": {"type": "boolean"},
                     "sensor_group": {"enum": ["cpu", "gpu", "memory", "storage", "wireless", "power", "battery", "neural", "system"]},
                     "trigger_celsius": {"type": "number", "minimum": -40, "maximum": 150},
+                    "trigger_seconds": {"type": "number", "minimum": 0, "maximum": 300, "default": 0},
                     "release_celsius": {"type": "number", "minimum": -40, "maximum": 150},
                     "release_seconds": {"type": "number", "minimum": 0, "maximum": 300},
                     "target_rpm": {"oneOf": [{"const": "max"}, {"type": "integer", "minimum": 1, "maximum": 16383}]},

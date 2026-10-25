@@ -525,6 +525,11 @@ struct RulesSheet: View {
             Toggle("启用温度规则", isOn: Binding(get: { model.draftEnabled }, set: { model.setDraftEnabled($0) }))
                 .disabled(editingLocked || ruleDocumentEnabled(model.rulesDraft) == nil)
             Text("修改后点击“保存并应用”。规则启用时暂停手动调速；所有触发条件解除后恢复系统自动。").font(.caption).foregroundStyle(.secondary)
+            Text("trigger_seconds 设置持续高温秒数；hook.program 可指定触发后运行的本机程序，失败不影响控扇。")
+                .font(.caption).foregroundStyle(.secondary)
+            if let hookStatus = model.snapshot?.rules?.hook?.summary {
+                Text(hookStatus).font(.caption).foregroundStyle(.secondary).accessibilityLabel(hookStatus)
+            }
             TextEditor(text: $model.rulesDraft)
                 .font(.system(size: 12, design: .monospaced))
                 .scrollContentBackground(.hidden)

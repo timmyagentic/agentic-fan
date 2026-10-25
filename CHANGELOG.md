@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add continuously observed high-temperature trigger delays and opt-in fixed-program rule hooks with bounded asynchronous execution, status reporting and a dry-run-first Lark CLI example.
+
 - Show the native app and menu bar with labeled demonstration data, make the signed DMG easier to find, and improve mobile installation text and link previews.
 
 - Clarify the Agent installation prompt, current-Agent Skill selection and installed CLI path while retaining read-only hardware acceptance.
