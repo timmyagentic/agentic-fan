@@ -44,8 +44,8 @@ struct ModelTests {
         assert(hook.summary == "上次执行超时，已跳过 1 个事件")
         let exampleEvent = try JSONSerialization.jsonObject(with: Data(RuleHookExamples.event.utf8)) as! [String: Any]
         assert(exampleEvent["simulated"] as? Bool == true && exampleEvent["event"] as? String == "rule_triggered")
-        let sampleBytes = try JSONSerialization.data(withJSONObject: RuleHookExamples.samples)
-        print("HOOK_EXAMPLES_JSON:" + String(decoding: sampleBytes, as: UTF8.self))
+        let sampleBytes = try JSONSerialization.data(withJSONObject: exampleEvent)
+        print("HOOK_EVENT_JSON:" + String(decoding: sampleBytes, as: UTF8.self))
         var hookDraft = try RuleHookDraft(document: delayedDocument)
         assert(!hookDraft.enabled)
         hookDraft.enabled = true

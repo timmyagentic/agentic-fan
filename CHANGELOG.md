@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Make general-purpose threshold Hooks visible in the main window and menu bar, with an executable/script picker, event JSON, Python/Shell templates, timeout, execution status and an editor that preserves other rules. Hook code can perform arbitrary user-defined actions; messaging is one example.
+- Make general-purpose threshold Hooks visible in the main window and menu bar, with a directly editable script file that starts as a no-op template. Save code without choosing a path or setting executable permissions; preserve existing text scripts, detect external edits, and show event JSON, timeout and execution status.
 - Retry unsuccessful first-launch login-item registration on a later launch while preserving explicit and system opt-outs; explain that login startup resumes saved rules and custom Hooks.
 
 - Simplify daily CI to one Python version and one core gate while retaining the macOS DMG build and installation contract.

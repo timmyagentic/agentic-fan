@@ -15,6 +15,30 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class NativeTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Hook file tests require the macOS Swift toolchain')
+    def test_native_hook_script_file_roundtrip(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binary = root / 'hook-file-tests'
+            compiled = subprocess.run(['swiftc', str(ROOT / 'native/HookScript.swift'), str(ROOT / 'native/HookCodeEditor.swift'),
+                                       str(ROOT / 'native/HookScriptTests.swift'),
+                                       '-o', str(binary)], capture_output=True)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr.decode(errors='replace'))
+            probe = subprocess.run([str(binary), str(root)], capture_output=True, timeout=10)
+            self.assertEqual(probe.returncode, 0, probe.stderr.decode(errors='replace'))
+            before = set(root.rglob('*'))
+            for name in ('noop.sh', 'blank.sh'):
+                result = subprocess.run([str(root / name)], input=b'{"simulated":true}\n',
+                                        cwd=root, capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, b'')
+            self.assertEqual(set(root.rglob('*')), before, 'The default/blank scripts must not perform any actions')
+            event = b'{"event":"rule_triggered","simulated":true}\n'
+            hook = root / 'hooks/threshold-hook.sh'
+            result = subprocess.run([str(hook)], input=event, cwd=hook.parent, capture_output=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((hook.parent / 'event.json').read_bytes(), event)
+
     @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Login item tests require the macOS Swift toolchain')
     def test_native_login_item_policy(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -51,12 +75,8 @@ class NativeTests(unittest.TestCase):
                     stdout, stderr = process.communicate(timeout=5)
                     self.fail(f"Native probe timed out. stdout={stdout!r}, stderr={stderr!r}\n{diagnostic}")
                 self.assertEqual(process.returncode, 0, stderr.decode(errors='replace'))
-                example_line = next(line for line in stdout.decode().splitlines() if line.startswith('HOOK_EXAMPLES_JSON:'))
-                examples = json.loads(example_line.partition(':')[2])
-                self.assertTrue(json.loads(examples[0])['simulated'])
-                compile(examples[1], '<native-hook-python-example>', 'exec')
-                shell = subprocess.run(['/bin/sh', '-n'], input=examples[2].encode(), capture_output=True)
-                self.assertEqual(shell.returncode, 0, shell.stderr.decode(errors='replace'))
+                example_line = next(line for line in stdout.decode().splitlines() if line.startswith('HOOK_EVENT_JSON:'))
+                self.assertTrue(json.loads(example_line.partition(':')[2])['simulated'])
 
     @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Native memory tests require the macOS Swift toolchain')
     def test_native_stream_memory_stays_bounded_with_slow_consumer(self):

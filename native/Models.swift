@@ -112,7 +112,7 @@ struct RulesRuntime: Decodable {
     }
     var mayOwnControl: Bool { controlActive == true || desiredRpm != nil || ["active", "cooling", "restoring"].contains(status) }
     var hookSummary: String {
-        guard let program = config?.hook?.program else { return "未设置 · 触发后运行自定义代码" }
+        guard let program = config?.hook?.program else { return "未启用 · 编辑阈值触发时执行的代码" }
         let name = URL(fileURLWithPath: program).lastPathComponent
         if !enabled { return "\(name) · 温度规则已关闭" }
         return "\(name) · \(hook?.summary ?? "等待规则触发")"
@@ -155,7 +155,7 @@ struct RuleHookDraft {
         }
         if enabled {
             guard program.hasPrefix("/"), !program.contains("\0") else {
-                throw Self.invalid("请选择本机可执行程序，或填写它的完整路径。")
+                throw Self.invalid("尚未确定脚本文件位置，请重新读取。")
             }
             guard timeoutSeconds.isFinite, (0.1...60).contains(timeoutSeconds) else {
                 throw Self.invalid("超时时间需要在 0.1–60 秒之间。")
@@ -189,33 +189,6 @@ enum RuleHookExamples {
       "control_confirmed": false
     }
     """#
-    static let python = #"""
-    #!/usr/bin/env python3
-    # Use an absolute interpreter path if needed.
-    import json
-    import sys
-    from pathlib import Path
-
-    event = json.load(sys.stdin)
-    if event.get("simulated"):
-        raise SystemExit(0)
-    log = Path.home() / "Library/Logs/AgenticFan/hook-events.jsonl"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with log.open("a") as output:
-        output.write(json.dumps(event) + "\n")
-    # Add your own code here: call an API, run a tool, etc.
-    """#
-    static let shell = #"""
-    #!/bin/sh
-    # Record the input, including its simulated flag.
-    event=$(cat)
-    log_dir="$HOME/Library/Logs/AgenticFan"
-    mkdir -p "$log_dir"
-    printf '%s\n' "$event" >> "$log_dir/hook-events.jsonl"
-    # Add your own commands here.
-    # Before real external actions, check simulated (e.g. using jq).
-    """#
-    static let samples = [event, python, shell]
 }
 func ruleNumber(_ value: Double) -> String {
     String(format: value.rounded() == value ? "%.0f" : "%.1f", value)
