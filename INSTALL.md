@@ -2,9 +2,9 @@
 
 用户可以直接说：
 
-> 帮我安装 https://github.com/timmyagentic/agentic-fan ，按照 INSTALL.md 安装 AgenticFan App、CLI 和 Codex skill，最后检查温度和风扇接口。
+> 请按 https://github.com/timmyagentic/agentic-fan/blob/codex/apple-silicon-dmg/INSTALL.md 安装最新正式版 AgenticFan App、CLI 和当前 Agent 的 skill，保留已有配置，最后只读检查真实温度和风扇接口，并报告版本、安装路径与未完成项。
 
-这句话已授权正常的本地安装步骤。无需让用户重复确认下载、安装 App、添加 CLI 和 skill。若使用 Claude Code，把句子中的 Codex 换成 Claude Code；也可以同时安装两种 skill。
+这句话已授权正常的本地安装步骤。无需让用户重复确认下载、安装 App、添加 CLI 和 skill。根据当前会话选择 Codex 或 Claude Code；用户要求时也可以同时安装两种 skill。
 
 ## 安装流程
 
@@ -21,7 +21,7 @@ curl --fail --location --proto '=https' \
 bash "$agenticfan_setup/install-macos.sh" --agent codex
 ```
 
-4. 使用 `--agent claude` 或 `--agent both` 选择其他目标。没有偏好时默认 Codex。安装不需要 `sudo`、Python、Xcode 或本地编译。
+4. 从当前 Agent 的会话上下文选择目标：Codex 用 `--agent codex`，Claude Code 用 `--agent claude`；用户要求两者时用 `--agent both`。上下文已明确时不要重复询问。安装不需要 `sudo`、Python、Xcode 或本地编译。
 5. 安装器只解析一次正式 Release 的 tag，随后固定同一版本下载 DMG 和 SHA-256。核对校验和、磁盘镜像、代码签名与 Gatekeeper 后安装 App、CLI 和 skill。它保留 shell 配置并添加 PATH；重复安装不会追加配置。自定义 CLI/skill 冲突会被保留并报错，旧 App 保留为同目录下的 `AgenticFan.previous.*.app`。
 6. 当前 Agent 进程的 PATH 不会随父 shell 配置自动更新。立即使用以下绝对路径验证；新登录 shell 可以直接使用 `agenticfan`：
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 统一 README 与官网安装提示词，按当前 Agent 安装 skill，并区分自动安装和手动安装的 CLI 路径，保留只读硬件验收。
+
 - 将 Clash Verge Monitor 官网入口切换到更名后的正式域名。
 
 - 将官网关联项目入口名称更新为 Clash Verge Monitor。
