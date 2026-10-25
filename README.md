@@ -14,7 +14,7 @@
 
 ## 给 Agent 一句话安装
 
-> 帮我安装 https://github.com/timmyagentic/agentic-fan ，按照 INSTALL.md 安装 AgenticFan App、CLI 和 Codex skill，最后检查温度和风扇接口。
+> 请按 https://github.com/timmyagentic/agentic-fan/blob/codex/apple-silicon-dmg/INSTALL.md 安装最新正式版 AgenticFan App、CLI 和当前 Agent 的 skill，保留已有配置，最后只读检查真实温度和风扇接口，并报告版本、安装路径与未完成项。
 
 Agent 按 [INSTALL.md](INSTALL.md) 下载已构建的 DMG、校验安装包、安装 App、配置 `agenticfan` 命令和 skill，再运行只读诊断。也支持 Claude Code 或两者同时安装。安装器默认使用 `~/Applications`，不需要 Python 或本地编译。
 
@@ -23,6 +23,8 @@ bash scripts/install-macos.sh --agent codex
 ```
 
 从 [最新正式 Release](https://github.com/timmyagentic/agentic-fan/releases/latest) 下载 `install-macos.sh`，阅读后执行 `bash install-macos.sh --agent codex`。默认安装匿名下载同一正式版的 DMG 与校验文件，不需要 GitHub 登录、Python 或本地编译；也支持 `--dmg PATH` 离线安装。
+
+安装脚本完成后，当前会话可直接使用 `"$HOME/.local/bin/agenticfan" doctor` 和 `snapshot`；不需要重启 Agent。下方 `/Applications` 命令仅对应手动拖入系统“应用程序”目录的安装，若选择其他目录请使用实际路径。
 
 ## 安装与运行
 
