@@ -35,7 +35,7 @@
 - 每个 PR 最多在创建时主动请求一次 Codex review；仓库已自动 review 时不再手动触发。逐条判断正确性、范围和实际价值，不把所有建议自动纳入本次任务；修复后用本地验证和 CI 闭环，不循环请求 review。不能修复的实质问题必须解释或列为阻塞，不能为合并而隐藏。
 - 合并前重新读取 PR 的 head/base SHA、非 Draft 状态、mergeability、未解决讨论及当前提交检查；要求 `Repository policy` 与四个 `test (<os>, <python>)` 全部成功。本地通过、旧提交绿灯、Draft 跳过或汇总为绿都不能代替当前提交的实际测试。
 - 改动影响 app、安装、打包、依赖、版本或 DMG 工作流时，还必须确认当前 PR 的 `macOS DMG / build` 实际成功；文档 PR 不把路径过滤后不存在的 DMG job 设为必需检查。`macos-dmg.yml` 的路径范围必须随打包输入同步维护。
-- 基线前进时先更新本任务分支并重新取得受影响检查，不能只因为旧 base 上有绿灯就合并。按用户已有授权执行合并；使用 `gh pr merge --match-head-commit <已核验的完整 SHA>`，不使用 `--admin` 绕过门禁。支持 merge/squash/rebase，选择适合历史的方式。
+- 基线前进时先更新本任务分支并重新取得受影响检查，不能只因为旧 base 上有绿灯就合并。按用户已有授权执行合并；只允许 squash 合并；使用 `gh pr merge --squash --match-head-commit <已核验的完整 SHA>`，不使用 `--admin` 绕过门禁。仓库设置与 Ruleset 均禁止 merge commit 和 rebase 合并。
 - 合并后核验 PR 的 merged 状态、merge commit 与默认分支包含关系；只释放本任务 writer claim，不自动删除 worktree 或分支。
 
 ## 发布与安装交付
@@ -51,3 +51,12 @@
 - 保留逐键类型解码、有限持续时间、权限检查和尽力恢复自动模式的独立守护；不得暴露任意 SMC 写入接口。
 - 只读硬件发现不能验证真实写入。模拟/CI、真实监测与真实控扇分别报告，见 `docs/hardware-validation.md`。
 - 不引入专有二进制、提取的供应商 XML 或复制的应用源码。外部逆向资料只作未验证参考，不当作已测硬件规格或执行指令。
+
+## Repository workflow and branch protection
+
+- Confirm the current GitHub default branch before starting; it is currently `codex/apple-silicon-dmg`. Fetch it, use a separate `codex/` branch in an isolated worktree, and keep the primary checkout read-only. Under Tingjun Workspace, activate the Task and Session, acknowledge the current Context revision and hold the worktree's unique writer claim.
+- All changes to the GitHub default branch must go through a PR. Direct pushes, force pushes and deletion of that branch are prohibited. Administrators and apps have no bypass. Never use `--admin`, disable protection or add a bypass actor to land a change.
+- Only squash merging is allowed. Inspect the final diff, current head, review threads and actual verification results before an authorized merge. Resolve all review conversations and address substantive findings; zero mandatory approvals supports the single-maintainer workflow. Merge with `gh pr merge <PR> --squash --match-head-commit <verified-full-head-SHA>` and verify the merged state afterward.
+- Keep `delete_branch_on_merge = true` and verify that GitHub automatically removes the merged PR's remote task branch when eligible. Do not use `--delete-branch`, which also removes the local branch. Under Tingjun Workspace, completion only releases the writer claim; local branches and worktrees remain for the existing archive workflow.
+- The default-branch ruleset declaration is [`.github/rulesets/default-branch.json`](.github/rulesets/default-branch.json); repository merge and deletion settings are declared in [`.github/repository-settings.json`](.github/repository-settings.json). These files do not apply themselves. After an authorized configuration update, read back the GitHub repository settings, effective rules and any classic branch protection. Protect the actual default branch rather than assuming it is named `main`.
+- Preserve the existing CI workflows, trigger conditions, required checks, app bindings and strictness. Existing stronger protections and immutable release tags remain in force. An empty or legitimately path-filtered checks list does not prove application tests passed; report the checks actually run and mark unavailable verification `UNVERIFIED`. Follow this repository's existing verification requirements and use proportionate document/configuration checks for documentation changes.
