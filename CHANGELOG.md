@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Show the native app and menu bar with labeled demonstration data, make the signed DMG easier to find, and improve mobile installation text and link previews.
+
 - Clarify the Agent installation prompt, current-Agent Skill selection and installed CLI path while retaining read-only hardware acceptance.
 
 - Point the Clash Verge Monitor website link to its renamed canonical domain.
