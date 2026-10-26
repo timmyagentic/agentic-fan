@@ -35,11 +35,11 @@ DEFAULT = {"version": 1, "enabled": False, "fan": 0, "rules": [
 ]}
 
 
-def default_path(demo=False):
+def default_path(demo=False, create_runtime=True):
     if os.environ.get("AGENTICFAN_RULES_PATH"):
         return Path(os.environ["AGENTICFAN_RULES_PATH"]).expanduser().absolute()
     if demo:
-        return runtime_directory(True) / "rules.json"
+        return runtime_directory(True, create=create_runtime) / "rules.json"
     return Path.home() / "Library/Application Support/AgenticFan/rules.json"
 
 
@@ -169,8 +169,14 @@ def status(path):
         with state_path(path).open("rb") as stream:
             data = json.loads(stream.read(MAX_BYTES + 1))
         age = max(0, time.time() - data["updated_at_unix"])
-        os.kill(data["pid"], 0)
-        running = data.get("running") is True and age <= 4
+        alive = False
+        if data.get("running") is True:
+            try:
+                os.kill(data["pid"], 0)
+                alive = True
+            except OSError:
+                pass
+        running = alive and age <= 4
         return {**data, "running": running, "heartbeat_age_seconds": age,
                 "status": data.get("status") if running or not data.get("running") else "stale"}
     except (OSError, ValueError, KeyError, TypeError):
@@ -527,6 +533,7 @@ def run(path, hw, sample, output, *, demo=False, parent_watch=False, count=None)
             if not verified:
                 code = 7
             latest = {**latest, "status": "stopped" if verified else "error", "running": False,
+                      "hook": runner.hooks.status(),
                       "automatic_mode_verified": verified, "control_active": False if verified else latest.get("control_active"),
                       "pid": os.getpid(), "updated_at_unix": time.time(), "simulated": demo}
             try:

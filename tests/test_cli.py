@@ -52,6 +52,8 @@ class CLITests(unittest.TestCase):
         manifest = messages[0]["data"]
         self.assertEqual(manifest["schema_version"], 2)
         self.assertIn("fans set", [x["command"] for x in manifest["commands"]])
+        self.assertTrue({'hook show', 'hook apply', 'hook validate', 'hook status'} <= {x['command'] for x in manifest['commands']})
+        self.assertEqual(manifest['hook_files']['revision']['missing'], 'missing')
 
     def test_snapshot_and_watch_are_explicit_simulations(self):
         code, messages = self.run_cli("snapshot")

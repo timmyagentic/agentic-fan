@@ -41,7 +41,7 @@ struct ModelTests {
         let delayed = try decoder.decode(RulesConfiguration.self, from: Data(delayedDocument.utf8))
         assert(delayed.rules[0].summary.contains("持续 10 秒"))
         let hook = try decoder.decode(RuleHookRuntime.self, from: Data(#"{"running":false,"queued":0,"dropped":1,"last_result":{"status":"timed_out"}}"#.utf8))
-        assert(hook.summary == "上次 Hook：执行超时，已跳过 1 个事件")
+        assert(hook.summary == "上次执行超时，已跳过 1 个事件")
         let edited = try ruleDocument(document, enabled: true)
         let preserved = try JSONSerialization.jsonObject(with: Data(edited.utf8)) as! [String: Any]
         assert(ruleDocumentEnabled(edited) == true && preserved["note"] as? String == "preserve me")

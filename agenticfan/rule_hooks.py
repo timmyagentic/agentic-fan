@@ -8,8 +8,10 @@ from pathlib import Path
 import signal
 import subprocess
 import threading
+import time
 
 from .errors import invalid
+from .hook_files import observed_revision
 
 
 def validate_hook(value):
@@ -76,7 +78,10 @@ class HookDispatcher:
                 if self.closed:
                     return
                 hook, event, generation = self.pending.popleft()
-            result = {'event_id': event['event_id'], 'rule_id': event['rule']['id'], 'status': 'failed'}
+            started = time.monotonic()
+            result = {'event_id': event['event_id'], 'rule_id': event['rule']['id'], 'status': 'failed',
+                      'program': hook['program'], 'started_at': time.time(), 'script_revision': None,
+                      'revision_evidence': 'observed_before_spawn_not_an_immutable_snapshot'}
             process = None
             try:
                 if os.geteuid() == 0:
@@ -90,6 +95,7 @@ class HookDispatcher:
                         if self.closed or generation != self.generation:
                             continue
                     # Process creation may itself be slow; never hold the sampling-side lock.
+                    result['script_revision'] = observed_revision(hook['program'])
                     process = subprocess.Popen([hook['program']], stdin=subprocess.PIPE,
                                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                                cwd=str(Path(hook['program']).parent), env=env,
@@ -112,7 +118,14 @@ class HookDispatcher:
                         process.communicate()
             except OSError as exc:
                 result['reason'] = type(exc).__name__
+                result['errno'] = exc.errno
             finally:
+                result['script_revision_after'] = (observed_revision(hook['program'])
+                                                   if process is not None or result['script_revision'] else None)
+                result['script_changed_during_execution'] = (result['script_revision'] != result['script_revision_after']
+                                                             if result['script_revision'] else None)
+                result['finished_at'] = time.time()
+                result['duration_seconds'] = round(time.monotonic() - started, 6)
                 with self.condition:
                     if self.closed or generation != self.generation:
                         result['status'] = 'cancelled'

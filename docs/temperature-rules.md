@@ -43,6 +43,26 @@ agenticfan rules status
 
 ## 固定程序 Hook
 
+Hook 是一个通用的阈值事件执行入口。温度规则达到持续触发条件后，运行预先配置的本机代码；代码可以记录数据、调用 API、启动其他工具或完成使用者需要的动作。发送飞书消息只是其中一个脚本示例，App不限定Hook的业务用途。
+
+在原生主窗口左栏底部或菜单栏弹窗中点击 **阈值 Hook**，直接编辑脚本内容，再点击 **保存脚本与设置**（⌘S）。新配置使用规则文件旁的 `hooks/threshold-hook.sh`；默认只有解释器声明和注释，不执行任何动作。打开编辑器不会写入文件，首次保存时才创建；应用自动设置执行权限，之后始终载入已保存的内容。可以点击 **打开所在位置** 在外部编辑这个文件。
+
+```sh
+#!/bin/sh
+# 在这里编写温度规则触发后要执行的代码。
+# 事件 JSON 通过标准输入传入；默认不执行任何动作。
+```
+
+没有解释器声明的空白内容或普通命令会自动加上 `#!/bin/sh`。也可自行使用 Python、JavaScript 等解释器的 shebang，建议指定本机可用的绝对解释器路径。需要事件时，在 Shell 中用 `event=$(cat)` 读取标准输入，或在 Python 中用 `json.load(sys.stdin)`；真实外部动作前可检查事件的 `simulated` 标记。代码执行的业务动作不限于通知。
+
+已有 Hook 指向 UTF-8 文本脚本时，直接编辑原文件，保留原目录及相邻依赖。二进制程序、符号链接或大于 256 KB 的文件不会被编辑器改写；可明确点击 **使用默认脚本**，保存设置后才切换，原文件仍保留。高级用户仍可通过规则 JSON 配置其他可执行程序。
+
+编辑器检查脚本是否被外部修改，并原子保存完整文件；发生冲突时要求重新读取，避免旧草稿覆盖新代码。规则设置仍使用修订检查，保留其他温度规则及其启用状态。脚本和设置分别报告保存结果：脚本保存后，下次事件会读取最新代码；若设置应用失败，界面明确提示，避免把两个独立文件的写入误认为同一事务。**完成**不保存草稿，默认脚本保持关闭。
+
+入口显示程序名、等待触发或上次执行结果；执行失败和事件丢弃会提示检查。程序退出成功只表示退出状态为0，业务动作是否完成由代码自己确认。界面不会为了测试而直接运行任意程序或降低温度阈值，详细日志由Hook代码写入自己的文件。
+
+App默认在首次正常启动时开启登录自启。注册失败会在设置显示错误并在后续启动重试；主动关闭的选择会保留。登录后，App从同一持久配置文件恢复已开启的温度规则和Hook；需保证Helper兼容、程序及其解释器/CLI仍可用，代码所依赖的外部服务仍有权限。真正的重启登录验收与模拟或App重启检查分开记录。
+
 在配置顶层增加 `"hook": {"program": "/absolute/path/to/executable", "timeout_seconds": 10}`；省略或设为 `null` 时关闭。路径必须为受信任本机可执行文件的绝对路径；不接受shell命令串，不插值参数，不使用root Helper运行。程序以当前用户执行，工作目录为程序父目录，继承用户环境但清除冻结Python运行时变量。程序可使用自身已有的Lark CLI登录态，不在规则文件中保存凭据。
 
 每条规则由未触发变为激活时，stdin收到一行JSON，例如：
@@ -54,6 +74,41 @@ agenticfan rules status
 事件表达温度条件成立，不代表已达到目标RPM；外部控制占用时也可通知，此时`control_status`为`paused`。每次激活只执行一次，相同内容重写配置不重复通知。真实修改该规则后重新计时，其他未变规则保留状态。重启运行器或采样失效后重新满足完整条件会产生新事件；本期不承诺跨重启exactly-once投递。
 
 独立worker串行运行，最多排队16项。超时范围0.1–60秒，默认10秒；退出非零、文件缺失、超时和队列满仅记录Hook状态，不暂停采样和控扇。满队列丢弃新事件，不无限堆积，不自动重试；`hook.last_result`、`queued`、`running`、`dropped`可用于诊断。输出丢弃，避免无限日志及泄露凭据；外部程序需要详细日志时自行管理。禁用规则、更换/移除Hook会取消等待和执行中的任务；退出时先恢复本运行器持有的控扇，再结束Hook及其同进程组子进程。此机制不是任意程序的沙箱；不支持自行脱离进程组长期驻留的Hook。
+
+## Agent 与界面共用的 Hook 接口
+
+0.4.4 的原生编辑器通过同一 CLI 读取、保存、检查草稿及刷新状态；文件路径、模板、权限和冲突规则均在共享核心。`agenticfan schema` 的 `hook_files` 提供字段、默认模板、错误码与语义，随安装包分发的 Skill 给出完整流程。
+
+| 命令 | 行为 |
+| --- | --- |
+| `hook show` | 返回默认/当前文件位置、内容、是否存在/可编辑/可执行、脚本修订与规则修订、启停设置和执行记录；不创建文件 |
+| `hook apply` | 校验并原子保存代码及执行权限，按显式选项更新 Hook 设置；默认保留原启停状态，不修改温度规则总开关 |
+| `hook validate` | 检查已保存文件，或用 `--stdin`/`--file` 检查草稿；不运行用户脚本 |
+| `hook status` | 返回文件元数据、校验结果、运行器状态和执行版本记录，不包含代码，也不创建文件 |
+
+四个命令都支持 `--config /absolute/rules.json`。当没有配置 Hook 时，默认文件为规则文件旁的 `hooks/threshold-hook.sh`。已有 Hook 默认选中其原文件；`--default` 显式选择默认文件，读取或仅保存它不会自动替换已配置的程序。
+
+`hook apply` 和 `hook validate` 的 `--stdin`/`--file` 接收 **UTF-8 脚本原文**，不是 JSON。先读到修订，再校验和应用：
+
+```sh
+agenticfan hook show
+agenticfan hook validate --file /absolute/draft.sh
+agenticfan hook apply --file /absolute/draft.sh \
+  --if-revision <script.revision> \
+  --if-rules-revision <settings.rules_revision>
+agenticfan hook validate
+agenticfan hook status
+```
+
+脚本修订是文件字节的 SHA-256，新文件使用字面量 `missing`；规则修订独立计算。内容写入和启用都要求这两个修订，防止旧内容覆盖其他编辑器或把另一份脚本误设为当前 Hook。显式启用时追加 `--enable --timeout-seconds 15 --wait 8`（按实际需求设置超时）；关闭使用 `hook apply --disable --if-rules-revision <revision>`，保留脚本文件和其他规则。`HOOK_CONFLICT`、`CONFIG_CONFLICT` 或 `HOOK_BUSY` 要求重新读取/合并/重试。
+
+`hook validate` 无输入时还检查文件存在、可执行权限和解释器可用性；有输入时检查草稿，并报告是否添加了默认 shebang。固定系统 sh/bash 使用不执行模式检查语法；Python使用当前CLI的AST解析器，其他语言明确返回 `syntax.status: unsupported`，不会调用任意解释器做检查。错误返回退出码2和`error.details.validation`；查看`issues`及`warnings`，不能把未支持的检查当成通过。shebang使用LF换行；`env`解释器依赖当前进程PATH，多参数需用`env -S`。检查不证明另一进程环境、外部依赖或业务动作成功。
+
+应用回执分别报告`script_saved`/`script_saved_revision`、`settings_saved`、`rules_revision`/`rules_generation`与`rules_loaded`。脚本和规则是两个文件，`HOOK_APPLY_PARTIAL`会保留已成功写入的事实并要求回读，不伪装成全部回滚。只保存代码不重写规则JSON；文件更新后，运行器处理下一个事件时读取最新代码。加载规则设置不等于执行了脚本，CLI不会为验证而降低温度阈值或直接试跑。
+
+执行回执包含`program`、`script_revision`、`script_revision_after`、起止时间、耗时、退出状态及`script_changed_during_execution`。监测进程停止后仍保留最后回执，退出时会更新被取消的执行结果。`hook status`将这些观测与当前文件对比，`last_observed_revision_matches_current`没有可比对证据时为null。前后观测不是不可变执行快照，外部编辑器仍可能竞争；版本一致也不表示业务动作成功，需同时查看`last_result.status`及程序自己的结果。无法追踪的超大/特殊可执行文件可缺少版本观测。
+
+`rules validate`仍负责规则JSON结构，脚本可执行性与语法由`hook validate`负责。合成事件的`simulated:true`只是输入标记，任意用户代码仍可执行真实动作；只有在相应动作已获授权时才安排实际试跑。
 
 ## Lark CLI 示例与试用参数
 

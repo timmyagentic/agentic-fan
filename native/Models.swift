@@ -88,6 +88,11 @@ struct RulesConfiguration: Decodable {
     let enabled: Bool
     let fan: Int
     let rules: [TemperatureRule]
+    let hook: RuleHookConfiguration?
+}
+struct RuleHookConfiguration: Decodable {
+    let program: String
+    let timeoutSeconds: Double?
 }
 struct RulesRuntime: Decodable {
     let enabled: Bool
@@ -106,6 +111,15 @@ struct RulesRuntime: Decodable {
         ["disabled": "规则已关闭", "watching": "规则监测中", "pending": "高温持续确认中", "active": "温度规则已触发", "cooling": "降温确认中", "restoring": "正在恢复系统自动", "paused": "规则已暂停", "error": "规则运行异常"][status] ?? status
     }
     var mayOwnControl: Bool { controlActive == true || desiredRpm != nil || ["active", "cooling", "restoring"].contains(status) }
+    var hookSummary: String {
+        guard let program = config?.hook?.program else { return "未启用 · 编辑阈值触发时执行的代码" }
+        let name = URL(fileURLWithPath: program).lastPathComponent
+        if !enabled { return "\(name) · 温度规则已关闭" }
+        return "\(name) · \(hook?.summary ?? "等待规则触发")"
+    }
+    var hookNeedsAttention: Bool {
+        config?.hook != nil && ((hook?.dropped ?? 0) > 0 || ["failed", "timed_out"].contains(hook?.lastResult?.status ?? ""))
+    }
 }
 struct RuleHookRuntime: Decodable {
     struct Result: Decodable { let status: String }
@@ -114,10 +128,10 @@ struct RuleHookRuntime: Decodable {
     let dropped: Int
     let lastResult: Result?
     var summary: String? {
-        if running { return "Hook 正在执行（等待 \(queued) 项）" }
+        if running { return "正在执行（等待 \(queued) 项）" }
         guard let result = lastResult else { return nil }
         let label = ["succeeded": "执行成功", "failed": "执行失败", "timed_out": "执行超时", "cancelled": "已取消"][result.status] ?? result.status
-        return "上次 Hook：\(label)" + (dropped > 0 ? "，已跳过 \(dropped) 个事件" : "")
+        return "上次\(label)" + (dropped > 0 ? "，已跳过 \(dropped) 个事件" : "")
     }
 }
 func ruleNumber(_ value: Double) -> String {

@@ -1,4 +1,5 @@
 from copy import deepcopy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -104,6 +105,25 @@ class HookTests(unittest.TestCase):
         self.assertTrue(event['simulated'])
         self.assertFalse(event['control_confirmed'])
         self.assertTrue(first['control_active'])
+        receipt = runner.hooks.status()['last_result']
+        self.assertEqual(receipt['program'], program)
+        self.assertEqual(receipt['script_revision'], hashlib.sha256(Path(program).read_bytes()).hexdigest())
+        self.assertEqual(receipt['script_revision_after'], receipt['script_revision'])
+        self.assertFalse(receipt['script_changed_during_execution'])
+
+    def test_execution_revision_reports_changes_without_claiming_an_immutable_snapshot(self):
+        program = self.program('sleep 0.3')
+        old_revision = hashlib.sha256(Path(program).read_bytes()).hexdigest()
+        dispatcher = HookDispatcher(); self.addCleanup(dispatcher.close)
+        dispatcher.submit({'program': program}, {'event_id': 'revision-test', 'rule': {'id': 'cpu-hot'}})
+        self.wait_for(lambda: dispatcher.status()['running'])
+        Path(program).write_text('#!/bin/sh\n# changed while running\n')
+        self.wait_for(lambda: dispatcher.status()['last_result'] is not None)
+        receipt = dispatcher.status()['last_result']
+        self.assertEqual(receipt['script_revision'], old_revision)
+        self.assertEqual(receipt['script_revision_after'], hashlib.sha256(Path(program).read_bytes()).hexdigest())
+        self.assertTrue(receipt['script_changed_during_execution'])
+        self.assertIn('not_an_immutable_snapshot', receipt['revision_evidence'])
 
     def test_timeout_and_failure_do_not_pause_control_and_leave_no_child(self):
         for body, expected in [('sleep 20', 'timed_out'), ('exit 3', 'failed')]:

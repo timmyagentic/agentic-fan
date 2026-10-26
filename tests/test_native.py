@@ -15,6 +15,26 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class NativeTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Hook editor tests require the macOS Swift toolchain')
+    def test_native_hook_editor_uses_core_documents(self):
+        from agenticfan import hook_files
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binary = root / 'hook-editor-tests'
+            compiled = subprocess.run(['swiftc', str(ROOT / 'native/HookDocument.swift'), str(ROOT / 'native/HookCodeEditor.swift'),
+                                       str(ROOT / 'native/HookDocumentTests.swift'), '-o', str(binary)], capture_output=True)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr.decode(errors='replace'))
+            config = root / 'rules.json'
+            document = hook_files.show(config)
+            for current in [document, hook_files.apply(config, b'', if_revision='missing',
+                              if_rules_revision=document['settings']['rules_revision'], enabled=True)['document']]:
+                probe = subprocess.run([str(binary)], input=json.dumps(current), text=True, capture_output=True, timeout=10)
+                self.assertEqual(probe.returncode, 0, probe.stderr)
+                options = json.loads(probe.stdout)['apply_options']
+                self.assertEqual(options[options.index('--if-revision') + 1], current['script']['revision'])
+                self.assertEqual(options[options.index('--if-rules-revision') + 1], current['settings']['rules_revision'])
+                self.assertIn('--stdin', options)
+
     @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Login item tests require the macOS Swift toolchain')
     def test_native_login_item_policy(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -51,6 +71,7 @@ class NativeTests(unittest.TestCase):
                     stdout, stderr = process.communicate(timeout=5)
                     self.fail(f"Native probe timed out. stdout={stdout!r}, stderr={stderr!r}\n{diagnostic}")
                 self.assertEqual(process.returncode, 0, stderr.decode(errors='replace'))
+
 
     @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Native memory tests require the macOS Swift toolchain')
     def test_native_stream_memory_stays_bounded_with_slow_consumer(self):
