@@ -66,6 +66,7 @@ def main():
         controlled = run(binary, "--demo", "fans", "set", "--fan", "all", "--rpm", "3000", "--duration", "1", env=demo_env)
         assert json.loads(controlled.stdout.splitlines()[-1])["data"]["automatic_mode_verified"]
         runpy.run_path(str(ROOT / 'packaging/macos/build.py'))['hook_smoke'](binary, work, demo_env)
+        runpy.run_path(str(ROOT / 'packaging/macos/build.py'))['curve_smoke'](binary, work, demo_env)
         if args.dmg:
             corrupt = work / "corrupt.dmg"
             corrupt.write_bytes(b"not the downloaded disk image")
@@ -76,7 +77,7 @@ def main():
                                      "--user-root", str(untouched)], capture_output=True, text=True)
             assert failed.returncode != 0 and "checksum mismatch" in failed.stderr
             assert not untouched.exists()
-        print("PASS: app installation, both skills, CLI and Hook workflow, profile preservation, repeated installation, and simulated control")
+        print("PASS: app installation, both skills, CLI, Hook and curve workflows, profile preservation, repeated installation, and simulated control")
 
 
 if __name__ == "__main__":

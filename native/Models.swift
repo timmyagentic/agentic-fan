@@ -89,6 +89,98 @@ struct RulesConfiguration: Decodable {
     let fan: Int
     let rules: [TemperatureRule]
     let hook: RuleHookConfiguration?
+    let mode: String?
+    let curve: TemperatureCurve?
+}
+struct CurveNode: Decodable, Identifiable, Equatable {
+    var id = UUID()
+    var temperatureCelsius: Double
+    var targetRpm: Int
+    enum CodingKeys: String, CodingKey { case temperatureCelsius, targetRpm }
+    init(_ temperature: Double, _ rpm: Int) { temperatureCelsius = temperature; targetRpm = rpm }
+}
+struct TemperatureCurve: Decodable {
+    let sensorGroup: String
+    let nodes: [CurveNode]
+    let rampRpmPerSecond: Double?
+    var summary: String { "\(sensorGroup.uppercased()) · \(nodes.count) 个节点 · 线性插值 · 平滑调速" }
+}
+enum CurveMode: String, CaseIterable {
+    case automatic, curve, rules
+    var title: String {
+        switch self { case .automatic: return "系统自动"; case .curve: return "自定义曲线"; case .rules: return "温度规则" }
+    }
+}
+struct CurveDraft {
+    var source = ""
+    var mode: CurveMode = .automatic
+    var fan = 0
+    var sensorGroup = "cpu"
+    var nodes: [CurveNode] = []
+    var ramp = 200.0
+    init() {}
+    init(document: String, fans: [Fan]) throws {
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let config = try decoder.decode(RulesConfiguration.self, from: Data(document.utf8))
+        source = document; fan = config.fan
+        mode = config.enabled ? (config.mode == "curve" ? .curve : .rules) : .automatic
+        if let curve = config.curve {
+            nodes = curve.nodes; sensorGroup = curve.sensorGroup; ramp = curve.rampRpmPerSecond ?? 200
+        } else {
+            let selected = fans.first { $0.id == fan }
+            let low = Int(ceil(selected?.minRpm ?? 1000)), high = Int(floor(selected?.maxRpm ?? 4900))
+            let span = max(0, high - low)
+            nodes = [CurveNode(60, low), CurveNode(80, low + span / 4),
+                     CurveNode(90, low + span * 3 / 5), CurveNode(100, high)]
+        }
+    }
+    var sortedNodes: [CurveNode] { nodes.sorted { $0.temperatureCelsius < $1.temperatureCelsius } }
+    mutating func addNode() -> UUID? {
+        guard nodes.count < 16, nodes.count >= 2 else { return nil }
+        let sorted = sortedNodes
+        guard let pair = zip(sorted, sorted.dropFirst()).max(by: {
+            $0.1.temperatureCelsius - $0.0.temperatureCelsius < $1.1.temperatureCelsius - $1.0.temperatureCelsius
+        }), pair.1.temperatureCelsius - pair.0.temperatureCelsius >= 0.2 else { return nil }
+        let temperature = ((pair.0.temperatureCelsius + pair.1.temperatureCelsius) * 5).rounded() / 10
+        let fraction = (temperature - pair.0.temperatureCelsius) / (pair.1.temperatureCelsius - pair.0.temperatureCelsius)
+        let node = CurveNode(temperature, Int((Double(pair.0.targetRpm) + fraction * Double(pair.1.targetRpm - pair.0.targetRpm)).rounded()))
+        nodes.append(node); nodes.sort { $0.temperatureCelsius < $1.temperatureCelsius }
+        return node.id
+    }
+    mutating func removeNode(_ id: UUID) {
+        guard nodes.count > 2 else { return }
+        nodes.removeAll { $0.id == id }
+    }
+    func document(fans: [Fan]) throws -> String {
+        guard var object = try JSONSerialization.jsonObject(with: Data(source.utf8)) as? [String: Any] else {
+            throw issue("请先读取当前配置。")
+        }
+        object["enabled"] = mode != .automatic
+        if mode == .automatic { return try ruleDocument(object) }
+        object["mode"] = mode.rawValue
+        if mode == .rules { return try ruleDocument(object) }
+        guard let selected = fans.first(where: { $0.id == fan }), selected.canControl else { throw issue("请选择可控的风扇。") }
+        guard (2...16).contains(nodes.count) else { throw issue("请保留 2–16 个节点。") }
+        guard ramp.isFinite && (1...1000).contains(ramp) else { throw issue("平滑速度需为每秒 1–1000 RPM。") }
+        let sorted = sortedNodes
+        for (index, node) in sorted.enumerated() {
+            guard node.temperatureCelsius.isFinite && (-40...150).contains(node.temperatureCelsius) else { throw issue("节点温度需为 −40–150°C 内的有限数值。") }
+            guard Double(node.targetRpm) >= selected.minRpm! && Double(node.targetRpm) <= selected.maxRpm! else {
+                throw issue("每个节点转速需在 \(rpmText(selected.minRpm))–\(rpmText(selected.maxRpm)) RPM 内。")
+            }
+            if index > 0 {
+                guard node.temperatureCelsius > sorted[index - 1].temperatureCelsius else { throw issue("节点温度不能重复。") }
+                guard node.targetRpm >= sorted[index - 1].targetRpm else { throw issue("温度升高时转速应保持或增加。") }
+            }
+        }
+        object["fan"] = fan
+        object["curve"] = ["sensor_group": sensorGroup, "ramp_rpm_per_second": ramp,
+                           "nodes": sorted.map { ["temperature_celsius": $0.temperatureCelsius, "target_rpm": $0.targetRpm] }]
+        return try ruleDocument(object)
+    }
+    private func issue(_ text: String) -> NSError {
+        NSError(domain: "AgenticFan", code: 2, userInfo: [NSLocalizedDescriptionKey: text])
+    }
 }
 struct RuleHookConfiguration: Decodable {
     let program: String
@@ -101,6 +193,7 @@ struct RulesRuntime: Decodable {
     let loadedRevision: String?
     let config: RulesConfiguration?
     let desiredRpm: Int?
+    let curveTargetRpm: Int?
     let activeRuleIds: [String]
     let error: String?
     let automaticModeVerified: Bool?
@@ -108,10 +201,13 @@ struct RulesRuntime: Decodable {
     let controlActive: Bool?
     let hook: RuleHookRuntime?
     var statusText: String {
-        ["disabled": "规则已关闭", "watching": "规则监测中", "pending": "高温持续确认中", "active": "温度规则已触发", "cooling": "降温确认中", "restoring": "正在恢复系统自动", "paused": "规则已暂停", "error": "规则运行异常"][status] ?? status
+        if status == "disabled" { return "系统自动" }
+        if config?.mode == "curve", status == "active" { return "曲线平滑调速中" }
+        return ["watching": "规则监测中", "pending": "高温持续确认中", "active": "温度规则已触发", "cooling": "降温确认中", "restoring": "正在恢复系统自动", "paused": "规则已暂停", "error": "规则运行异常"][status] ?? status
     }
     var mayOwnControl: Bool { controlActive == true || desiredRpm != nil || ["active", "cooling", "restoring"].contains(status) }
     var hookSummary: String {
+        if config?.mode == "curve" { return "曲线模式 · 阈值触发代码已保留" }
         guard let program = config?.hook?.program else { return "未启用 · 编辑阈值触发时执行的代码" }
         let name = URL(fileURLWithPath: program).lastPathComponent
         if !enabled { return "\(name) · 温度规则已关闭" }

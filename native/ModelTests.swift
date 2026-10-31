@@ -47,6 +47,25 @@ struct ModelTests {
         assert(ruleDocumentEnabled(edited) == true && preserved["note"] as? String == "preserve me")
         assert((preserved["rules"] as? [[String: Any]])?.first?["note"] as? String == "keep rule fields")
         assert(ruleDocumentEnabled(#"{"enabled":1}"#) == nil && ruleDocumentEnabled("invalid") == nil)
+        var curveDraft = try CurveDraft(document: document, fans: [fan])
+        curveDraft.mode = .curve
+        curveDraft.nodes = [CurveNode(60, 1200), CurveNode(80, 2200), CurveNode(90, 3200), CurveNode(100, 4500)]
+        let curveJSON = try curveDraft.document(fans: [fan])
+        let curveObject = try JSONSerialization.jsonObject(with: Data(curveJSON.utf8)) as! [String: Any]
+        assert(curveObject["note"] as? String == "preserve me", "Curve edits must preserve unrelated settings")
+        assert((curveObject["rules"] as? [[String: Any]])?.count == 2)
+        let curveConfig = try decoder.decode(RulesConfiguration.self, from: Data(curveJSON.utf8))
+        assert(curveConfig.enabled && curveConfig.mode == "curve" && curveConfig.curve?.nodes.count == 4)
+        assert(curveDraft.addNode() != nil && curveDraft.nodes.count == 5)
+        let added = curveDraft.nodes.first { $0.temperatureCelsius == 70 }!
+        assert(added.targetRpm == 1700)
+        curveDraft.removeNode(added.id)
+        assert(curveDraft.nodes.count == 4)
+        curveDraft.nodes[1].temperatureCelsius = 60
+        do { _ = try curveDraft.document(fans: [fan]); fatalError("Duplicate curve temperatures accepted") } catch { }
+        curveDraft.mode = .automatic
+        let automaticJSON = try curveDraft.document(fans: [fan])
+        assert(ruleDocumentEnabled(automaticJSON) == false, "Automatic mode must remain available even with an invalid draft")
         let runtime = try decoder.decode(RulesRuntime.self, from: Data(#"{"enabled":true,"status":"active","config_path":"/tmp/rules.json","loaded_revision":"abc","desired_rpm":4900,"active_rule_ids":["cpu-hot"],"control_confirmed":false}"#.utf8))
         assert(runtime.mayOwnControl && runtime.statusText == "温度规则已触发" && !runtime.controlConfirmed && runtime.config == nil)
         let legacySnapshot = try decoder.decode(Snapshot.self, from: Data(#"{"sensors":[],"fans":[],"temperature_overview":[]}"#.utf8))

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "enabled": false,
+  "fan": 0,
+  "mode": "curve",
+  "curve": {
+    "sensor_group": "cpu",
+    "ramp_rpm_per_second": 200,
+    "nodes": [
+      {"temperature_celsius": 60, "target_rpm": 1200},
+      {"temperature_celsius": 80, "target_rpm": 2200},
+      {"temperature_celsius": 90, "target_rpm": 3200},
+      {"temperature_celsius": 100, "target_rpm": 4500}
+    ]
+  },
+  "rules": [
+    {"id": "cpu-hot", "enabled": true, "sensor_group": "cpu", "trigger_celsius": 99,
+     "release_celsius": 95, "release_seconds": 5, "target_rpm": "max"}
+  ]
+}

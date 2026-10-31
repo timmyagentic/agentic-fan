@@ -1,5 +1,19 @@
 # 温度规则与 Agent 配置
 
+## 自定义温度—转速曲线
+
+原生应用的“编辑…”入口提供系统自动、自定义曲线和已有温度规则三种方式。曲线支持添加、删除、拖动节点，也可直接编辑温度与 RPM；保存并应用后才生效。切回系统自动会停止本应用持有的控制，保留已保存的曲线、阈值规则和 Hook。
+
+[曲线配置示例](../examples/temperature-curve.json)默认关闭，数值仅用于说明，须按 `agenticfan fans` 返回的实际 RPM 范围和用户批准的参数调整。顶层 `mode: "curve"` 选择曲线，`enabled: false` 选择系统自动；缺少 `mode` 时保持旧版阈值行为。`curve.sensor_group` 选择一组已识别有效测点，`nodes` 需要 2–16 个节点，每个节点为 `temperature_celsius` 与整数 `target_rpm`。温度严格递增，转速可持平或增加；所有节点都须在选中风扇的硬件范围内，不能只验证当前插值结果。
+
+节点之间线性插值，例如 80°C/2200 RPM 与 90°C/3200 RPM 之间，85°C 对应 2700 RPM；低于首节点或高于末节点时保持端点转速，不会在端点反复切换系统自动。温度来源仍是分组内有效已识别测点的最高值，不是封装温度或平均值。
+
+`ramp_rpm_per_second` 限制升降转速速度，范围 1–1000，默认每秒 200 RPM。执行器从观测到的当前转速开始逐步接近插值目标；迟到采样不会补成大幅跳变。运行态的 `curve_target_rpm` 为曲线目标，`desired_rpm` 为当前平滑请求，`control_confirmed` 只确认当前更新序号的实际 RPM。程序限制的是下发目标，物理风扇响应与噪音需要单独实机验证。
+
+曲线复用 `rules show/validate/apply/status/run` 和同一修订保护机制，CLI 无需另一份配置。曲线与阈值规则互斥执行，曲线模式保留但不执行阈值 Hook。切档在同一 Helper/guardian 会话内只更新选中风扇的目标，不反复恢复自动；更新不延长 3600 秒硬期限和 5 秒心跳租约。失效/过期数据、非法配置、停止或期限到达仍释放本执行器持有的控制。外部自动请求仍暂停运行，需明确重新应用才恢复。
+
+## 阈值规则
+
 AgenticFan 使用一份用户本地 JSON，原生应用与 CLI 共用同一套校验和执行逻辑。默认路径为 `~/Library/Application Support/AgenticFan/rules.json`，`agenticfan rules show` 返回实际绝对路径、配置、修订号和运行状态。`--config PATH` 或环境变量 `AGENTICFAN_RULES_PATH` 可指定另一份配置。不存在的文件显示以下默认值，默认关闭：
 
 ```json
