@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.5 — 2026-11-01
+
 - Fix curve tracking feedback in 0.4.5: report fresh hardware observations of the applied target independently of pending requests, expire stale feedback, and revoke confirmation when RPM drifts after an earlier success. Keep exact sequence confirmation and continuous mismatch deadlines. Show applied/actual RPM and tracking state in the native UI; stop retaining healthy feedback after control ends.
 
 ## 0.4.4 — 2026-10-31

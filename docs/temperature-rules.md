@@ -10,7 +10,7 @@
 
 `ramp_rpm_per_second` 限制升降转速速度，范围 1–1000，默认每秒 200 RPM。执行器从观测到的当前转速开始逐步接近插值目标；迟到采样不会补成大幅跳变。运行态的 `curve_target_rpm` 为曲线目标，`desired_rpm` 为当前平滑请求。程序限制的是下发目标，物理风扇响应与噪音需要单独实机验证。
 
-0.4.5 开发版本新增 `control_feedback`，用于持续跟随状态。Helper 每秒先读取当前已生效目标的实际转速，再下发下一目标，避免将旧测量归到新请求。反馈包含该次 `sequence`、`target_rpm`、`actual_rpm`、`sampled_at`、`sampled_monotonic`、`tolerance_rpm`、`within_tolerance`，运行态另附 `status`、`age_seconds` 和 `pending_update`。Helper 事件中的 `actual_rpm` 按风扇 ID 映射，规则运行态则是所选风扇的单个数值。
+0.4.5 新增 `control_feedback`，用于持续跟随状态。Helper 每秒先读取当前已生效目标的实际转速，再下发下一目标，避免将旧测量归到新请求。反馈包含该次 `sequence`、`target_rpm`、`actual_rpm`、`sampled_at`、`sampled_monotonic`、`tolerance_rpm`、`within_tolerance`，运行态另附 `status`、`age_seconds` 和 `pending_update`。Helper 事件中的 `actual_rpm` 按风扇 ID 映射，规则运行态则是所选风扇的单个数值。
 
 - `tracking`：最近有效采样在 `max(100 RPM, 目标的 8%)` 容差内；即使 `pending_update:true`，仍可表示正在正常跟随已下发的目标。
 - `adjusting`：最近采样未达到该目标容差。持续偏离达到 15 秒会报错并恢复自动模式，曾经确认成功或不断更新目标均不能清除连续失配计时。
