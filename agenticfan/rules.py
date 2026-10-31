@@ -26,6 +26,8 @@ from .errors import AgenticFanError, invalid
 from .protocol import failure, success
 from .runtime import lock, runtime_directory
 from .rule_hooks import HookDispatcher, validate_hook
+from . import curves
+from .curves import finite_number as _number
 
 MAX_BYTES = 65536
 GROUPS = {"cpu", "gpu", "memory", "storage", "wireless", "power", "battery", "neural", "system"}
@@ -43,17 +45,16 @@ def default_path(demo=False, create_runtime=True):
     return Path.home() / "Library/Application Support/AgenticFan/rules.json"
 
 
-def _number(value):
-    try:
-        return type(value) in (float, int) and math.isfinite(value)
-    except OverflowError:
-        return False
-
-
 def validate(config):
     fields = {"version", "enabled", "fan", "rules"}
-    if not isinstance(config, dict) or not fields <= set(config) or set(config) - fields - {"hook"}:
-        raise invalid("Rules require version, enabled, fan and rules, with optional hook.")
+    if not isinstance(config, dict) or not fields <= set(config) or set(config) - fields - {"hook", "mode", "curve"}:
+        raise invalid("Rules require version, enabled, fan and rules, with optional hook, mode and curve.")
+    if config.get("mode", "rules") not in ("rules", "curve"):
+        raise invalid("Control mode must be rules or curve. Disable the configuration for system automatic mode.")
+    if "curve" in config:
+        curves.validate(config["curve"], GROUPS)
+    elif config.get("mode") == "curve":
+        raise invalid("Curve mode requires a curve configuration.")
     validate_hook(config.get("hook"))
     if type(config["version"]) is not int or config["version"] != 1:
         raise invalid("Unsupported rules version; expected 1.")
@@ -232,6 +233,18 @@ class Evaluator:
                       and not sensor.get("exclude_from_overview") and _number(sensor.get("value"))]
             readings[component["group"]] = max(values) if values else None
         fan = next((fan for fan in sample.get("fans", []) if fan["id"] == self.config["fan"]), None)
+        if self.config.get("mode") == "curve":
+            self.active.clear(); self.hot_since.clear(); self.cool_since.clear()
+            curve = self.config["curve"]
+            value = readings.get(curve["sensor_group"])
+            target = None
+            if self.config["enabled"] and value is not None:
+                curves.validate_fan(curve, fan)
+                target = curves.interpolate(curve["nodes"], value)
+            return {"desired_rpm": target, "curve_target_rpm": target,
+                    "active_rule_ids": [], "triggered_rule_ids": [], "rule_states": [],
+                    "pending": False, "cooling": False, "readings": readings,
+                    "readings_available": not self.config["enabled"] or value is not None}
         enabled = [rule for rule in self.config["rules"] if self.config["enabled"] and rule["enabled"]]
         targets = []
         rule_states = []
@@ -284,6 +297,10 @@ class Control:
     """One observed guardian connection, never an orphaned CLI subprocess."""
     def __init__(self, fan, rpm, demo):
         self.fan, self.rpm, self.demo = fan, rpm, demo
+        self.initial_rpm = rpm
+        self.target_lock = threading.Lock()
+        self.pending_target = None
+        self.sequence = 0
         self.cancelled = threading.Event()
         self.messages = queue.Queue()
         self.started = self.confirmed = self.restored = False
@@ -302,13 +319,14 @@ class Control:
                 hw = demo_hardware()
                 def wait_stop(delay):
                     return self.cancelled.wait(delay) or time.monotonic() >= self.fresh_until
-                run_session(hw, runtime_directory(True), [self.fan], self.rpm, 3600, False,
-                            self.messages.put, wait_stop)
+                run_session(hw, runtime_directory(True), [self.fan], self.initial_rpm, 3600, False,
+                            self.messages.put, wait_stop, target_update=self.take_target)
             else:
                 from .helper import request
-                code = request("set", fans=[self.fan], rpm=self.rpm, duration=3600,
+                code = request("set", fans=[self.fan], rpm=self.initial_rpm, duration=3600,
                                experimental_ftst=False, lease_seconds=5, output=self.messages.put,
-                               cancel_event=self.cancelled, heartbeat=lambda: time.monotonic() < self.fresh_until)
+                               cancel_event=self.cancelled, heartbeat=lambda: time.monotonic() < self.fresh_until,
+                               target_update=self.take_target)
         except Exception as exc:
             error = exc if isinstance(exc, AgenticFanError) else AgenticFanError("RULE_CONTROL_ERROR", str(exc))
             self.messages.put(failure(error, self.demo))
@@ -328,9 +346,10 @@ class Control:
                 self.exit_code = message["exit"]
             if message.get("event") == "control_started":
                 self.started = True
-            if message.get("event") == "control_confirmed":
-                self.confirmed = True
             data = message.get("data", {})
+            if (message.get("event") == "control_confirmed" and data.get("target_rpm") == self.rpm
+                    and data.get("sequence", 0) == self.sequence):
+                self.confirmed = True
             if data.get("automatic_mode_verified") is True:
                 self.restored = True
                 self.reason = data.get("reason")
@@ -340,6 +359,18 @@ class Control:
 
     def cancel(self):
         self.cancelled.set()
+
+    def update(self, rpm):
+        with self.target_lock:
+            self.rpm = rpm
+            self.sequence += 1
+            self.pending_target = {"rpm": rpm, "sequence": self.sequence}
+            self.confirmed = False
+
+    def take_target(self):
+        with self.target_lock:
+            target, self.pending_target = self.pending_target, None
+            return target
 
     def refresh(self):
         self.fresh_until = time.monotonic() + 3
@@ -352,6 +383,8 @@ class Runner:
         self.pause = None
         self.automatic_verified = True  # No outstanding write owned by this runner.
         self.last_fan = None
+        self.control_mode = None
+        self.curve_slew = None
         self.hooks = HookDispatcher()
 
     def tick(self, sample, now, fresh=True):
@@ -360,6 +393,7 @@ class Runner:
             doc = load(self.path)
             if self.document is None or doc.generation != self.document.generation:
                 if self.document and (self.document.config.get("hook") != doc.config.get("hook")
+                                      or self.document.config.get("mode", "rules") != doc.config.get("mode", "rules")
                                       or not doc.config["enabled"]):
                     self.hooks.cancel()
                 if self.evaluator is None:
@@ -400,9 +434,32 @@ class Runner:
             if not self.automatic_verified:
                 self.pause = "Automatic restoration was not verified. Restore automatic mode and inspect fan state."
             self.control = None
+            self.control_mode = None
         desired = decision["desired_rpm"] if not error and not self.pause else None
-        if self.control and (desired != self.control.rpm or (config and config["fan"] != self.control.fan)):
+        mode = (config or {}).get("mode", "rules")
+        if mode == "curve" and desired is not None:
+            if (self.curve_slew is None or self.control is None or self.control_mode != "curve"
+                    or self.control.fan != config["fan"]):
+                fan = self.last_fan
+                observed = fan.get("actual_rpm")
+                if not _number(observed):
+                    observed = fan.get("target_rpm")
+                if not _number(observed):
+                    observed = fan["min_rpm"]
+                self.curve_slew = curves.Slew(min(math.floor(fan["max_rpm"]), max(math.ceil(fan["min_rpm"]), observed)), now)
+            desired = self.curve_slew.step(desired, now, config["curve"].get("ramp_rpm_per_second", curves.DEFAULT_RAMP))
+            decision["desired_rpm"] = desired
+        else:
+            self.curve_slew = None
+        if self.control and (desired is None or (config and config["fan"] != self.control.fan)
+                             or mode != self.control_mode):
             self.control.cancel()
+        elif self.control and desired != self.control.rpm and not self.control.cancelled.is_set():
+            if mode == "curve":
+                self.control.update(desired)
+                self.control.refresh()
+            else:
+                self.control.cancel()
         elif self.control and desired is not None and not self.control.cancelled.is_set():
             self.control.refresh()
         if desired is not None and self.control is None:
@@ -410,6 +467,7 @@ class Runner:
                 self.pause = "Fan is already controlled manually or its mode is unknown; rules did not take over."
             elif self.automatic_verified:
                 self.control = self.control_factory(config["fan"], desired, self.demo)
+                self.control_mode = mode
                 self.automatic_verified = False
         if self.control and self.control.cancelled.is_set():
             state = "restoring"

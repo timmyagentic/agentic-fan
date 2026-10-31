@@ -80,6 +80,61 @@ class HelperProtocolTests(unittest.TestCase):
 
 
 class HelperRelayTests(unittest.TestCase):
+    def test_leased_retarget_crosses_socket_and_guardian_then_restores(self):
+        # Replace only the test worker's initial backend selection with explicit
+        # demo. Exercise real relay framing, guardian parsing and final receipts.
+        script = '''from agenticfan import guardian
+original = guardian.json.loads
+def synthetic(data, *args, **kwargs):
+ value = original(data, *args, **kwargs)
+ if isinstance(value, dict) and 'fans' in value and 'duration' in value:
+  value['demo'] = True
+ return value
+guardian.json.loads = synthetic
+raise SystemExit(guardian.main())
+'''
+        with tempfile.TemporaryDirectory() as temporary:
+            client, server = socket.socketpair()
+            self.addCleanup(client.close)
+            errors = []
+            def work():
+                try:
+                    helper.relay(server, request(duration=30, lease_seconds=5), threading.Event(),
+                                 command=[sys.executable, '-c', script],
+                                 env=dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1]),
+                                          AGENTICFAN_DEMO_DIR=temporary))
+                except Exception as exc:
+                    errors.append(exc)
+                finally:
+                    server.close()
+            thread = threading.Thread(target=work, daemon=True)
+            thread.start(); client.settimeout(8)
+            stream = client.makefile('r'); self.addCleanup(stream.close)
+            started = json.loads(stream.readline())
+            self.assertEqual(started['event'], 'control_started')
+            self.assertTrue(started['simulated'])
+            client.sendall(b'.{"rpm":3200,"sequence":1}\n')
+            while True:
+                message = json.loads(stream.readline())
+                if message.get('event') == 'control_confirmed' and message['data'].get('sequence') == 1:
+                    self.assertEqual(message['data']['target_rpm'], 3200)
+                    self.assertEqual(message['data']['actual_rpm']['0'], 3200)
+                    break
+                self.assertTrue(message.get('ok'), message)
+            client.shutdown(socket.SHUT_WR)
+            finished = None
+            while True:
+                message = json.loads(stream.readline())
+                if message.get('event') == 'control_finished': finished = message
+                if 'helper_exit_code' in message:
+                    self.assertEqual(message['helper_exit_code'], 0)
+                    break
+            thread.join(8)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(errors, [])
+            self.assertTrue(finished['data']['automatic_mode_verified'])
+            self.assertEqual(json.loads((Path(temporary) / 'state.json').read_text())['F0Md'], '00')
+
     def test_socket_disconnect_closes_guardian_pipe_and_restores(self):
         # Real transport/subprocess exercise with an explicitly simulated SMC.
         with tempfile.TemporaryDirectory() as tmp:

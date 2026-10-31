@@ -65,7 +65,7 @@ MANIFEST = {
         "properties": {
             "schema_version": {"const": SCHEMA_VERSION}, "ok": {"type": "boolean"}, "simulated": {"type": "boolean"},
             "timestamp": {"type": "string", "format": "date-time"},
-            "event": {"enum": ["sample", "control_started", "control_confirmed", "control_finished", "rules_finished"]},
+            "event": {"enum": ["sample", "control_started", "control_target_updated", "control_confirmed", "control_finished", "rules_finished"]},
             "data": {"type": "object", "properties": {
                 "sensors": {"type": "array", "items": {"$ref": "#/$defs/temperature_sensor"}},
                 "sensor_issues": {"type": "array", "items": {"$ref": "#/$defs/temperature_sensor"}},
@@ -120,6 +120,16 @@ MANIFEST["rules_configuration"] = {
         "type": "object", "additionalProperties": False, "required": ["version", "enabled", "fan", "rules"],
         "properties": {
             "version": {"const": 1}, "enabled": {"type": "boolean"},
+            "mode": {"enum": ["rules", "curve"], "default": "rules", "description": "Absent preserves legacy threshold rules. enabled=false selects system automatic mode."},
+            "curve": {"type": "object", "additionalProperties": False, "required": ["sensor_group", "nodes"],
+                      "properties": {
+                          "sensor_group": {"enum": ["cpu", "gpu", "memory", "storage", "wireless", "power", "battery", "neural", "system"]},
+                          "ramp_rpm_per_second": {"type": "number", "minimum": 1, "maximum": 1000, "default": 200},
+                          "nodes": {"type": "array", "minItems": 2, "maxItems": 16, "items": {
+                              "type": "object", "additionalProperties": False, "required": ["temperature_celsius", "target_rpm"],
+                              "properties": {"temperature_celsius": {"type": "number", "minimum": -40, "maximum": 150},
+                                             "target_rpm": {"type": "integer", "minimum": 1, "maximum": 16383}}}},
+                      }, "description": "Strictly increasing temperatures, nondecreasing RPM, all nodes within the selected fan's hardware bounds. Linear interpolation, endpoint clamping, then a time-based slew limit seeded from observed RPM."},
             "fan": {"type": "integer", "minimum": 0, "maximum": 9},
             "hook": {"description": "Optional user executable receiving one rule_triggered JSON event on stdin. No shell; no root execution; no automatic retries.",
                      "oneOf": [{"type": "null"}, {"type": "object", "additionalProperties": False,
@@ -142,8 +152,20 @@ MANIFEST["rules_configuration"] = {
                 },
             }},
         },
+        "allOf": [{"if": {"required": ["mode"], "properties": {"mode": {"const": "curve"}}}, "then": {"required": ["curve"]}}],
     },
 }
+MANIFEST['semantics']['temperature_curves'] = (
+    'Optional mode=curve uses one identified temperature group and 2..16 editable temperature/RPM nodes. '
+    'Interpolate linearly, hold endpoint RPM outside the node range, and apply ramp_rpm_per_second (default 200) '
+    'in both directions, starting at current observed fan speed. curve_target_rpm is the interpolated goal; '
+    'desired_rpm is the smoothed request. One bounded leased guardian session accepts sequenced RPM-only updates '
+    'without toggling automatic mode between targets. Updates do not extend its 3600-second deadline or heartbeat lease. '
+    'Confirmation is tied to the exact update sequence; moving targets cannot reset the 15-second tracking failure timer. '
+    'Missing/stale temperature, invalid config, stop or expiry releases owned control. External auto pauses until explicit reapply. '
+    'Curve mode retains threshold rules and Hook settings but does not evaluate rules or submit threshold Hook events. '
+    'No configured mode defaults to legacy rules; enabled=false disables either mode. No curve is enabled implicitly.'
+)
 
 _hook_selection = {
     '--config': {'type': 'string', 'description': 'Rules JSON used to select the current Hook; same override/default as rules commands.'},

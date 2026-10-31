@@ -199,6 +199,24 @@ class Hardware:
             if self.mode(index) != "manual":
                 raise AgenticFanError("CONTROL_REJECTED", "Hardware did not retain the requested mode/target.", fan=index)
 
+    def update_target(self, indices: list[int], rpm: int, expected_rpm: int, wait=None):
+        """Retarget the same owned fans; never change modes or select new keys."""
+        self.require_write()
+        available = {row["id"]: row for row in self.fans()}
+        for index in indices:
+            fan = available.get(index)
+            if not fan or fan["mode"] != "manual" or abs(self.number(f"F{index}Tg") - expected_rpm) > 1:
+                raise AgenticFanError("CONTROL_LOST", "Fan ownership changed before target update.")
+            if type(rpm) is not int or not fan["min_rpm"] <= rpm <= fan["max_rpm"]:
+                raise invalid("Updated RPM must fit every selected fan's reported range.")
+        for index in indices:
+            self.smc.write(f"F{index}Tg", encode_rpm(self.smc.info(f"F{index}Tg"), rpm))
+        for index in indices:
+            self._wait_value(lambda: self.number(f"F{index}Tg"), lambda x: abs(x - rpm) <= 1,
+                             "CONTROL_REJECTED", wait=wait, fan=index, field="target_rpm", expected=rpm)
+            if self.mode(index) != "manual":
+                raise AgenticFanError("CONTROL_LOST", "Fan mode changed during target update.")
+
     @staticmethod
     def _wait_value(read, accepted, code, wait=None, **details):
         # Poll readback, never blindly repeat a hardware write. The transport

@@ -19,6 +19,7 @@ final class Monitor: ObservableObject {
     @Published var mainWindowRequest: UInt = 0
     @Published var showDetails = false
     @Published var showRules = false
+    @Published var showCurve = false
     @Published var showHooks = false
     @Published var hookSaving = false
     @Published var rulesDraft = ""
@@ -55,6 +56,7 @@ final class Monitor: ObservableObject {
     var rulesEnabled: Bool { snapshot?.rules?.enabled == true }
     var rulesStatus: String { snapshot?.rules?.statusText ?? "正在读取规则…" }
     var rulesSummary: String {
+        if snapshot?.rules?.config?.mode == "curve", let curve = snapshot?.rules?.config?.curve { return curve.summary }
         let enabled = snapshot?.rules?.config?.rules.filter(\.enabled) ?? []
         guard let first = enabled.first else { return "可在 JSON 中添加温度条件与转速" }
         return first.summary + (enabled.count > 1 ? "，另有 \(enabled.count - 1) 条" : "")
@@ -377,7 +379,7 @@ struct FanPanel: View {
                             }
                         } else {
                             Text(mode(fan)).font(.caption).foregroundStyle(.secondary)
-                            Text(model.rulesEnabled ? "温度规则启用时由规则控制" : "定时调速结束后恢复自动").font(.caption).foregroundStyle(.secondary)
+                            Text(model.rulesEnabled ? (model.snapshot?.rules?.config?.mode == "curve" ? "温控曲线启用时平滑调速" : "温度规则启用时由规则控制") : "定时调速结束后恢复自动").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }.padding(compact ? 0 : 14).frame(maxWidth: .infinity, alignment: .leading)
@@ -390,12 +392,12 @@ struct FanPanel: View {
                     Spacer(minLength: 0)
                     Button("编辑…") {
                         if compact { AppDelegate.instance?.showMain() }
-                        model.showRules = true
-                    }.font(.caption).buttonStyle(.plain).foregroundStyle(.blue).accessibilityLabel("编辑温度规则")
+                        model.showCurve = true
+                    }.font(.caption).buttonStyle(.plain).foregroundStyle(.blue).accessibilityLabel("编辑温控曲线")
                 }
                 Text(model.rulesSummary).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if let rules = model.snapshot?.rules, let rpm = rules.desiredRpm {
-                    Text("目标 \(rpm) RPM · \(rules.controlConfirmed ? "已确认转速" : "正在达到目标")").font(.caption).monospacedDigit()
+                    Text("\(rules.curveTargetRpm.map { "曲线 \($0) · 平滑目标" } ?? "目标") \(rpm) RPM · \(rules.controlConfirmed ? "已确认转速" : "正在跟随")").font(.caption).monospacedDigit()
                 }
                 if model.rulesRecoveryRequired && !model.hasRunner {
                     Button("恢复系统自动") { model.restore() }.disabled(model.restoring)
@@ -641,6 +643,7 @@ struct SurfaceSheets: ViewModifier {
             .sheet(isPresented: $model.showDetails) { DetailsView(model: model) }
             .sheet(isPresented: $model.showSettings) { ServiceSettings(model: model) }
             .sheet(isPresented: $model.showRules) { RulesSheet(model: model) }
+            .sheet(isPresented: $model.showCurve) { CurveSheet(model: model) }
             .sheet(isPresented: $model.showHooks) { HookSheet(model: model) }
     }
 }
@@ -714,7 +717,7 @@ struct MenuPanel: View {
                 Button { model.restore(fanID: model.activeFanID) } label: { Text(model.restoring ? "正在恢复…" : "恢复系统自动").frame(maxWidth: .infinity) }
                     .buttonStyle(.borderedProminent).disabled(model.restoring)
             } else if model.rulesEnabled {
-                Button { showMain(); model.showRules = true } label: { Text("编辑温度规则…").frame(maxWidth: .infinity) }
+                Button { showMain(); model.showCurve = true } label: { Text("编辑温控曲线…").frame(maxWidth: .infinity) }
                     .buttonStyle(.borderedProminent).disabled(model.rulesSaving || model.rulesStopping)
             } else {
                 Button { showMain(); model.selectedFan = model.fans.first } label: { Text(model.busy ? "正在准备…" : "调整转速…").frame(maxWidth: .infinity) }

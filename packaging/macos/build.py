@@ -54,6 +54,31 @@ def _hook_smoke(executable: Path, directory: Path, env):
     assert command('validate', '--stdin', source=f'#!{interpreter}\npass\n')['syntax']['status'] == 'passed'
 
 
+def curve_smoke(executable: Path, directory: Path, env):
+    with tempfile.TemporaryDirectory(prefix='curve-smoke-', dir=directory) as temporary:
+        root = Path(temporary)
+        config = root / 'rules.json'
+        document = {'version': 1, 'enabled': True, 'fan': 0, 'mode': 'curve',
+                    'curve': {'sensor_group': 'cpu', 'ramp_rpm_per_second': 200,
+                              'nodes': [{'temperature_celsius': 60, 'target_rpm': 1200},
+                                        {'temperature_celsius': 100, 'target_rpm': 4500}]},
+                    'rules': [{'id': 'cpu-hot', 'enabled': True, 'sensor_group': 'cpu',
+                               'trigger_celsius': 99, 'release_celsius': 95, 'release_seconds': 5, 'target_rpm': 'max'}]}
+        isolated = dict(env, AGENTICFAN_DEMO_DIR=str(root / 'runtime'), AGENTICFAN_RULES_PATH=str(config))
+        run(executable, '--demo', 'rules', 'apply', '--stdin', input=json.dumps(document),
+            env=isolated, cwd=directory, capture_output=True, text=True, timeout=15)
+        result = run(executable, '--demo', 'rules', 'run', '--count', '6', env=isolated,
+                     cwd=directory, capture_output=True, text=True, timeout=20)
+        messages = [json.loads(line) for line in result.stdout.splitlines()]
+        assert messages and all(m['ok'] and m['simulated'] for m in messages)
+        samples = [m['data']['rules'] for m in messages if m.get('event') == 'sample']
+        targets = [s['desired_rpm'] for s in samples]
+        assert targets[0] == 1800 and targets[-1] == 1200 and len(set(targets)) > 2
+        assert all(abs(a - b) < 220 for a, b in zip(targets, targets[1:]))
+        assert samples[-1]['control_confirmed'] and messages[-1]['data']['automatic_mode_verified']
+    print('AGENTICFAN_CURVE_SMOKE_OK')
+
+
 def smoke(executable: Path, directory: Path, gui=True):
     """Exercise the bundled runtime outside the checkout, without system Python."""
     env = dict(os.environ, AGENTICFAN_DEMO_DIR=str(directory / "demo"),
@@ -73,6 +98,7 @@ def smoke(executable: Path, directory: Path, gui=True):
         if "--demo" in arguments and not all(message["simulated"] for message in messages):
             raise RuntimeError("Packaged smoke test was not explicitly simulated")
     hook_smoke(executable, directory, env)
+    curve_smoke(executable, directory, env)
     # Exercise rejection and presentation in the frozen app as well as source tests.
     # This file belongs exclusively to the explicitly simulated transport above.
     state_path = directory / "demo" / "state.json"
@@ -210,7 +236,7 @@ def main(argv=None):
         "artifact": dmg.name, "version": version, "architecture": "arm64", "minimum_macos": "15.0",
         "python": platform.python_version(), "pyinstaller": PyInstaller.__version__,
         "signing": "developer_id" if args.identity else "ad_hoc", "notarized": bool(args.notary_profile),
-        "verified": ["project_license", "codesign", "hdiutil", "mounted_app", "bundled_cli", "hook_file_workflow", "demo_guardian", "demo_gui", "demo_temperature_quality", "demo_menu_bar_startup"],
+        "verified": ["project_license", "codesign", "hdiutil", "mounted_app", "bundled_cli", "hook_file_workflow", "temperature_curve_workflow", "demo_guardian", "demo_gui", "demo_temperature_quality", "demo_menu_bar_startup"],
         "hardware_verified": False, "sha256": digest,
     }
     dmg.with_suffix(".build.json").write_text(json.dumps(metadata, indent=2) + "\n")

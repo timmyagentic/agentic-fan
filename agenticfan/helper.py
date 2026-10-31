@@ -24,7 +24,7 @@ from functools import lru_cache
 
 from . import __version__
 from .errors import AgenticFanError, invalid
-from .guardian import validate_duration
+from .guardian import validate_duration, validate_update
 from .protocol import emit, failure, success
 
 LABEL = 'io.github.timmyagentic.agenticfan.helper'
@@ -157,14 +157,15 @@ def relay(connection, request, stopping, command=None, env=None):
             watched = [process.stdout] + ([connection] if connected else [])
             ready, _, _ = select.select(watched, [], [], .25)
             if connected and connection in ready:
-                # Leased rules accept liveness pulses, never new targets or keys.
+                # Only a leased, already validated session receives updates. Its
+                # guardian bounds/validates frames and can update only these fans.
                 try:
-                    pulse = connection.recv(1)
+                    pulse = connection.recv(1024)
                 except OSError:
                     pulse = b''
-                if request.get('lease_seconds') and pulse == b'.' and not process.stdin.closed:
+                if request.get('lease_seconds') and pulse and not process.stdin.closed:
                     try:
-                        process.stdin.write(b'.')
+                        process.stdin.write(pulse)
                         process.stdin.flush()
                     except (BrokenPipeError, OSError):
                         process.stdin.close()
@@ -188,7 +189,7 @@ def relay(connection, request, stopping, command=None, env=None):
                         connected = False
                         if not process.stdin.closed:
                             process.stdin.close()
-            # Child output is limited to a handful of envelopes, never a log stream.
+            # Bound individual receipt buffers; never relay arbitrary child logs.
             if len(buffer) > 262144:
                 raise RuntimeError('Oversized guardian response')
         code = process.wait()
@@ -284,7 +285,7 @@ def serve():
     return 0
 
 
-def request(operation, *, output=emit, cancel_event=None, heartbeat=None, **parameters):
+def request(operation, *, output=emit, cancel_event=None, heartbeat=None, target_update=None, **parameters):
     payload = {'protocol': PROTOCOL, 'version': __version__, 'build': build_id(), 'operation': operation, **parameters}
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     interrupted = False
@@ -315,6 +316,13 @@ def request(operation, *, output=emit, cancel_event=None, heartbeat=None, **para
                     if heartbeat is not None and not interrupted and time.monotonic() >= next_heartbeat:
                         connection.sendall(b'.')
                         next_heartbeat = time.monotonic() + 1
+                    if target_update is not None and not interrupted:
+                        target = target_update()
+                        if target is not None:
+                            if not parameters.get('lease_seconds'):
+                                raise invalid('Target updates require a leased session.')
+                            validate_update(target)
+                            connection.sendall((json.dumps(target, separators=(',', ':')) + '\n').encode())
                     ready, _, _ = select.select([connection], [], [], .25)
                     if not ready:
                         continue
