@@ -114,13 +114,20 @@ raise SystemExit(guardian.main())
             self.assertEqual(started['event'], 'control_started')
             self.assertTrue(started['simulated'])
             client.sendall(b'.{"rpm":3200,"sequence":1}\n')
+            feedback = []
             while True:
                 message = json.loads(stream.readline())
+                if message.get('event') == 'control_feedback':
+                    feedback.append(message['data'])
                 if message.get('event') == 'control_confirmed' and message['data'].get('sequence') == 1:
                     self.assertEqual(message['data']['target_rpm'], 3200)
                     self.assertEqual(message['data']['actual_rpm']['0'], 3200)
                     break
                 self.assertTrue(message.get('ok'), message)
+            self.assertEqual(feedback[-1]['sequence'], 1)
+            self.assertEqual(feedback[-1]['target_rpm'], 3200)
+            self.assertEqual(feedback[-1]['actual_rpm']['0'], 3200)
+            self.assertTrue(feedback[-1]['within_tolerance'])
             client.shutdown(socket.SHUT_WR)
             finished = None
             while True:

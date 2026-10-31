@@ -50,6 +50,9 @@ class FakeControl:
     def refresh(self):
         pass
 
+    def feedback_state(self):
+        return None
+
 
 class RulesTests(unittest.TestCase):
     def setUp(self):

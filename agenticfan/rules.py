@@ -28,6 +28,7 @@ from .runtime import lock, runtime_directory
 from .rule_hooks import HookDispatcher, validate_hook
 from . import curves
 from .curves import finite_number as _number
+from .feedback import Feedback, expire as expire_feedback
 
 MAX_BYTES = 65536
 GROUPS = {"cpu", "gpu", "memory", "storage", "wireless", "power", "battery", "neural", "system"}
@@ -178,6 +179,14 @@ def status(path):
             except OSError:
                 pass
         running = alive and age <= 4
+        if isinstance(data.get('control_feedback'), dict):
+            data['control_feedback'] = expire_feedback(data['control_feedback'], time.monotonic(), running)
+            if not running and data.get('running'):
+                data['control_feedback']['status'] = 'stale'
+            if data['control_feedback']['status'] != 'tracking':
+                data['control_confirmed'] = False
+        if not running:
+            data['control_confirmed'] = False
         return {**data, "running": running, "heartbeat_age_seconds": age,
                 "status": data.get("status") if running or not data.get("running") else "stale"}
     except (OSError, ValueError, KeyError, TypeError):
@@ -304,6 +313,7 @@ class Control:
         self.cancelled = threading.Event()
         self.messages = queue.Queue()
         self.started = self.confirmed = self.restored = False
+        self.feedback = Feedback(fan)
         self.reason = self.error = self.exit_code = None
         self.fresh_until = time.monotonic() + 3
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -347,15 +357,21 @@ class Control:
             if message.get("event") == "control_started":
                 self.started = True
             data = message.get("data", {})
-            if (message.get("event") == "control_confirmed" and data.get("target_rpm") == self.rpm
-                    and data.get("sequence", 0) == self.sequence):
-                self.confirmed = True
+            if message.get('event') == 'control_feedback':
+                self.feedback.observe(data, self.sequence, self.rpm, time.monotonic())
             if data.get("automatic_mode_verified") is True:
                 self.restored = True
                 self.reason = data.get("reason")
             if message.get("error"):
                 self.error = message["error"]
+        self.feedback_state()
         return self.exit_code is not None
+
+    def feedback_state(self):
+        active = not (self.cancelled.is_set() or self.restored or self.error or self.exit_code is not None)
+        state = self.feedback.snapshot(self.sequence, time.monotonic(), active)
+        self.confirmed = state['status'] == 'tracking' and not state['pending_update']
+        return state
 
     def cancel(self):
         self.cancelled.set()
@@ -485,6 +501,7 @@ class Runner:
             state = "pending"
         else:
             state = "watching"
+        feedback = self.control.feedback_state() if self.control else None
         confirmed = bool(self.control and self.control.confirmed and config
                          and self.control.fan == config["fan"]
                          and self.control.rpm == decision["desired_rpm"]
@@ -506,6 +523,7 @@ class Runner:
                 **decision, "error": error or self.pause,
                 "hook": self.hooks.status(),
                 "control_confirmed": confirmed,
+                "control_feedback": feedback,
                 "automatic_mode_verified": self.automatic_verified,
                 "control_active": self.control is not None}
 
@@ -592,6 +610,8 @@ def run(path, hw, sample, output, *, demo=False, parent_watch=False, count=None)
                 code = 7
             latest = {**latest, "status": "stopped" if verified else "error", "running": False,
                       "hook": runner.hooks.status(),
+                      "control_confirmed": False,
+                      "control_feedback": expire_feedback(latest['control_feedback'], time.monotonic(), False) if latest.get('control_feedback') else None,
                       "automatic_mode_verified": verified, "control_active": False if verified else latest.get("control_active"),
                       "pid": os.getpid(), "updated_at_unix": time.time(), "simulated": demo}
             try:

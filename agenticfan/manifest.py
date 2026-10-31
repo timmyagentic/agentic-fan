@@ -65,7 +65,7 @@ MANIFEST = {
         "properties": {
             "schema_version": {"const": SCHEMA_VERSION}, "ok": {"type": "boolean"}, "simulated": {"type": "boolean"},
             "timestamp": {"type": "string", "format": "date-time"},
-            "event": {"enum": ["sample", "control_started", "control_target_updated", "control_confirmed", "control_finished", "rules_finished"]},
+            "event": {"enum": ["sample", "control_started", "control_target_updated", "control_feedback", "control_confirmed", "control_finished", "rules_finished"]},
             "data": {"type": "object", "properties": {
                 "sensors": {"type": "array", "items": {"$ref": "#/$defs/temperature_sensor"}},
                 "sensor_issues": {"type": "array", "items": {"$ref": "#/$defs/temperature_sensor"}},
@@ -106,10 +106,11 @@ MANIFEST = {
         "doctor": "temperature_interface_available means at least one interface returned a reading; monitoring_available requires at least one ok sensor. valid_sensor_count counts only ok sensors, not calibrated or independently verified physical sensors. status is limited when monitoring exists but warnings, errors or rejected readings remain. sensor_issues preserves rejected evidence. hardware_write_tested stays false.",
         "schema_migration": "v2 adds invalid status, raw_value, reason and quality summaries. Zero/unverified value is now null. Only consume value for status=ok; raw_value is diagnostic evidence, not fallback temperature.",
         "control_available": "Recognized readable keys and RPM bounds, not verified physical actuation.",
-        "control_confirmed": "Every selected fan was observed within max(100 RPM, 8 percent) of target.",
+        "control_confirmed": "The event records an observation within max(100 RPM, 8 percent) of that target/sequence. The rules runtime boolean requires a fresh observation of the exact latest requested sequence; it may be false during normal retargeting. It is not the continuous tracking health indicator.",
+        "control_feedback": "Leased guardians emit one control_feedback per hardware sample BEFORE applying the next target. The event contains sequence, target_rpm, actual_rpm by fan ID, tolerance_rpm, within_tolerance, sampled_at (UTC), and sampled_monotonic (same-host boot clock). Runtime control_feedback selects the owned fan's scalar actual_rpm and adds status (waiting/tracking/adjusting/stale/stopped), age_seconds and pending_update. tracking means the observed RPM follows the applied target even if a newer request is pending; it never confirms that newer sequence. Feedback older than 3 seconds or from the future cannot establish tracking. Keep only the latest observation from this session; stopped/failed sessions cannot transfer health to another session. Consumers must expire displayed snapshots too. Continuous mismatch still ends control and restores automatic mode after 15 seconds, even after earlier confirmation or with moving targets.",
         "stream_format": "NDJSON: each stdout line is an independent envelope. Read through the final event and check process exit status.",
         "cancel": "Ctrl-C/SIGTERM, closing the consumer, or loss of the CLI triggers guardian restoration. fans auto can interrupt a live session.",
-        "limitations": "No guarantee if the guardian is killed or blocked, the OS/kernel fails, or another controller races. No SMART disks, interpolated fan curves, or bundled AI model."
+        "limitations": "No guarantee if the guardian is killed or blocked, the OS/kernel fails, or another controller races. No SMART disks or bundled AI model."
     }
 }
 

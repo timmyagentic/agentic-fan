@@ -8,7 +8,15 @@
 
 节点之间线性插值，例如 80°C/2200 RPM 与 90°C/3200 RPM 之间，85°C 对应 2700 RPM；低于首节点或高于末节点时保持端点转速，不会在端点反复切换系统自动。温度来源仍是分组内有效已识别测点的最高值，不是封装温度或平均值。
 
-`ramp_rpm_per_second` 限制升降转速速度，范围 1–1000，默认每秒 200 RPM。执行器从观测到的当前转速开始逐步接近插值目标；迟到采样不会补成大幅跳变。运行态的 `curve_target_rpm` 为曲线目标，`desired_rpm` 为当前平滑请求，`control_confirmed` 只确认当前更新序号的实际 RPM。程序限制的是下发目标，物理风扇响应与噪音需要单独实机验证。
+`ramp_rpm_per_second` 限制升降转速速度，范围 1–1000，默认每秒 200 RPM。执行器从观测到的当前转速开始逐步接近插值目标；迟到采样不会补成大幅跳变。运行态的 `curve_target_rpm` 为曲线目标，`desired_rpm` 为当前平滑请求。程序限制的是下发目标，物理风扇响应与噪音需要单独实机验证。
+
+0.4.5 开发版本新增 `control_feedback`，用于持续跟随状态。Helper 每秒先读取当前已生效目标的实际转速，再下发下一目标，避免将旧测量归到新请求。反馈包含该次 `sequence`、`target_rpm`、`actual_rpm`、`sampled_at`、`sampled_monotonic`、`tolerance_rpm`、`within_tolerance`，运行态另附 `status`、`age_seconds` 和 `pending_update`。Helper 事件中的 `actual_rpm` 按风扇 ID 映射，规则运行态则是所选风扇的单个数值。
+
+- `tracking`：最近有效采样在 `max(100 RPM, 目标的 8%)` 容差内；即使 `pending_update:true`，仍可表示正在正常跟随已下发的目标。
+- `adjusting`：最近采样未达到该目标容差。持续偏离达到 15 秒会报错并恢复自动模式，曾经确认成功或不断更新目标均不能清除连续失配计时。
+- `waiting` / `stale` / `stopped`：分别是尚无反馈、反馈超过三秒（或时间无效）、当前控制会话的跟随监测已结束，均不能表示正常跟随。`stopped` 不代替自动恢复回执。
+
+`control_confirmed` 仍只确认**最新请求序号**：只有新鲜反馈对应当前目标才为 true；持续调速时它可能为 false，而 `control_feedback.status` 为 `tracking`。原生界面用持续反馈显示同一次采样的已下发／实际 RPM。`rules status` 会重新检查反馈年龄，其他消费者也须让旧快照过期；`sampled_monotonic` 只在本机本次启动内可比较。新会话不继承旧会话的反馈，停止后等待 `rules_finished.automatic_mode_verified` 确认恢复。
 
 曲线复用 `rules show/validate/apply/status/run` 和同一修订保护机制，CLI 无需另一份配置。曲线与阈值规则互斥执行，曲线模式保留但不执行阈值 Hook。切档在同一 Helper/guardian 会话内只更新选中风扇的目标，不反复恢复自动；更新不延长 3600 秒硬期限和 5 秒心跳租约。失效/过期数据、非法配置、停止或期限到达仍释放本执行器持有的控制。外部自动请求仍暂停运行，需明确重新应用才恢复。
 

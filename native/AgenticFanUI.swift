@@ -397,7 +397,14 @@ struct FanPanel: View {
                 }
                 Text(model.rulesSummary).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if let rules = model.snapshot?.rules, let rpm = rules.desiredRpm {
-                    Text("\(rules.curveTargetRpm.map { "曲线 \($0) · 平滑目标" } ?? "目标") \(rpm) RPM · \(rules.controlConfirmed ? "已确认转速" : "正在跟随")").font(.caption).monospacedDigit()
+                    Text("\(rules.curveTargetRpm.map { "曲线 \($0) · 平滑目标" } ?? "目标") \(rpm) RPM").font(.caption).monospacedDigit()
+                    if rules.controlActive == true {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            Text(rules.controlFeedback?.summary(at: context.date) ?? "等待转速反馈")
+                                .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
                 if model.rulesRecoveryRequired && !model.hasRunner {
                     Button("恢复系统自动") { model.restore() }.disabled(model.restoring)
