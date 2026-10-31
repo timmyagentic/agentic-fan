@@ -10,7 +10,7 @@
 
 **开发中的 0.4.4：可编辑温控曲线。** 支持增删、拖动和数字编辑温度／RPM 节点，节点之间线性插值，转速按设定速度平滑跟随；可切回系统自动，原有阈值规则与 Hook 配置保留。曲线与 CLI 共用一份配置，不会在升级时自动启用。详见[曲线设置与参数](docs/temperature-rules.md#自定义温度转速曲线)。
 
-![温控曲线编辑器（0.4.4 开发构建，模拟数据）](docs/images/temperature-curve.png)
+![温控曲线编辑器（0.4.4 开发构建，模拟数据）](docs/images/temperature-curve.jpg)
 
 ![阈值 Hook 脚本编辑器（0.4.4 开发构建，模拟数据）](docs/images/threshold-hook.jpg)
 
