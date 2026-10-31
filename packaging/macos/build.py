@@ -75,7 +75,11 @@ def curve_smoke(executable: Path, directory: Path, env):
         targets = [s['desired_rpm'] for s in samples]
         assert targets[0] == 1800 and targets[-1] == 1200 and len(set(targets)) > 2
         assert all(abs(a - b) < 220 for a, b in zip(targets, targets[1:]))
+        assert any(s['control_feedback']['status'] == 'tracking' and s['control_feedback']['pending_update']
+                   and not s['control_confirmed'] for s in samples if s.get('control_feedback'))
         assert samples[-1]['control_confirmed'] and messages[-1]['data']['automatic_mode_verified']
+        stopped = json.loads(config.with_name(config.name + '.state.json').read_text())
+        assert not stopped['control_confirmed'] and stopped['control_feedback']['status'] == 'stopped'
     print('AGENTICFAN_CURVE_SMOKE_OK')
 
 

@@ -68,6 +68,7 @@ def run_session(hw: Hardware, directory, indices, rpm, duration, experimental_ft
                     break
                 last_mono, last_wall = current, current_wall
                 if current >= next_sample:
+                    sampled_at = datetime.fromtimestamp(current_wall, timezone.utc).isoformat()
                     modes = [hw.mode(i) for i in indices]
                     if all(mode == "auto" for mode in modes):
                         reason = "external_auto"
@@ -76,6 +77,23 @@ def run_session(hw: Hardware, directory, indices, rpm, duration, experimental_ft
                         raise AgenticFanError("CONTROL_LOST", "Selected fan modes changed during control.")
                     if any(abs(hw.number(f"F{i}Tg") - rpm) > 1 for i in indices):
                         raise AgenticFanError("CONTROL_LOST", "A target RPM changed during control; another controller may be active.")
+                    # Observe the target that was in effect during this interval,
+                    # before writing the next target. A receipt never describes a
+                    # just-written target using measurements of its predecessor.
+                    actual = {str(i): hw.number(f"F{i}Ac") for i in indices}
+                    within_target = all(abs(value - rpm) <= max(100, rpm * 0.08) for value in actual.values())
+                    if target_update is not None:
+                        output(success({'actual_rpm': actual, 'target_rpm': rpm, 'sequence': sequence,
+                                        'sampled_monotonic': current, 'sampled_at': sampled_at,
+                                        'tolerance_rpm': max(100, rpm * .08), 'within_tolerance': within_target},
+                                       hw.simulated, 'control_feedback'))
+                    if within_target:
+                        unconfirmed_since = None
+                        if not confirmed:
+                            output(success({"actual_rpm": actual, "target_rpm": rpm, "sequence": sequence}, hw.simulated, "control_confirmed"))
+                    elif unconfirmed_since is None:
+                        unconfirmed_since = current
+                    confirmed = within_target
                     updated = target_update() if target_update is not None else None
                     if updated is not None and elapsed < duration:
                         validate_update(updated)
@@ -86,15 +104,6 @@ def run_session(hw: Hardware, directory, indices, rpm, duration, experimental_ft
                                 hw.update_target(indices, updated['rpm'], rpm, wait=wait_apply)
                         rpm, sequence, confirmed = updated['rpm'], updated['sequence'], False
                         output(success({"fans": indices, "target_rpm": rpm, "sequence": sequence}, hw.simulated, "control_target_updated"))
-                    actual = {str(i): hw.number(f"F{i}Ac") for i in indices}
-                    within_target = all(abs(value - rpm) <= max(100, rpm * 0.08) for value in actual.values())
-                    if within_target:
-                        unconfirmed_since = None
-                        if not confirmed:
-                            confirmed = True
-                            output(success({"actual_rpm": actual, "target_rpm": rpm, "sequence": sequence}, hw.simulated, "control_confirmed"))
-                    elif unconfirmed_since is None and (not confirmed or target_update is not None):
-                        unconfirmed_since = current
                     next_sample = current + 1
                 if unconfirmed_since is not None and current - unconfirmed_since >= min(15, duration):
                     raise AgenticFanError("CONTROL_NOT_CONFIRMED", "Actual RPM did not reach the target tolerance before the confirmation deadline.",

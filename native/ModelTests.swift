@@ -68,6 +68,18 @@ struct ModelTests {
         assert(ruleDocumentEnabled(automaticJSON) == false, "Automatic mode must remain available even with an invalid draft")
         let runtime = try decoder.decode(RulesRuntime.self, from: Data(#"{"enabled":true,"status":"active","config_path":"/tmp/rules.json","loaded_revision":"abc","desired_rpm":4900,"active_rule_ids":["cpu-hot"],"control_confirmed":false}"#.utf8))
         assert(runtime.mayOwnControl && runtime.statusText == "温度规则已触发" && !runtime.controlConfirmed && runtime.config == nil)
+        let feedbackDate = Date(timeIntervalSince1970: 1793448001)
+        let feedbackJSON = #"{"status":"tracking","target_rpm":1316,"actual_rpm":1317,"sampled_at":"2026-10-31T12:00:00+00:00","pending_update":true}"#
+        let feedback = try decoder.decode(ControlFeedback.self, from: Data(feedbackJSON.utf8))
+        assert(feedback.summary(at: feedbackDate).contains("跟随正常"))
+        assert(feedback.summary(at: feedbackDate).contains("目标更新中"))
+        assert(feedback.summary(at: feedbackDate.addingTimeInterval(3)) == "转速反馈已过期")
+        assert(feedback.summary(at: feedbackDate.addingTimeInterval(-2)) == "转速反馈已过期")
+        let drifting = try decoder.decode(ControlFeedback.self, from: Data(feedbackJSON.replacingOccurrences(of: "tracking", with: "adjusting").utf8))
+        assert(drifting.summary(at: feedbackDate).contains("正在调速"))
+        assert(!drifting.summary(at: feedbackDate).contains("跟随正常"))
+        let stoppedFeedback = try decoder.decode(ControlFeedback.self, from: Data(feedbackJSON.replacingOccurrences(of: "tracking", with: "stopped").utf8))
+        assert(stoppedFeedback.summary(at: feedbackDate) == "跟随监测已结束")
         let legacySnapshot = try decoder.decode(Snapshot.self, from: Data(#"{"sensors":[],"fans":[],"temperature_overview":[]}"#.utf8))
         assert(legacySnapshot.rules == nil, "Existing snapshot envelopes remain readable")
         // Keep the producer alive until its first event is delivered. A reader

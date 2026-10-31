@@ -199,6 +199,7 @@ struct RulesRuntime: Decodable {
     let automaticModeVerified: Bool?
     let controlConfirmed: Bool
     let controlActive: Bool?
+    let controlFeedback: ControlFeedback?
     let hook: RuleHookRuntime?
     var statusText: String {
         if status == "disabled" { return "系统自动" }
@@ -215,6 +216,36 @@ struct RulesRuntime: Decodable {
     }
     var hookNeedsAttention: Bool {
         config?.hook != nil && ((hook?.dropped ?? 0) > 0 || ["failed", "timed_out"].contains(hook?.lastResult?.status ?? ""))
+    }
+}
+struct ControlFeedback: Decodable {
+    let status: String
+    let targetRpm: Int?
+    let actualRpm: Double?
+    let sampledAt: String?
+    let pendingUpdate: Bool
+
+    func state(at now: Date) -> String {
+        guard status == "tracking" || status == "adjusting" else { return status }
+        guard let sampledAt else { return "stale" }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var date = formatter.date(from: sampledAt)
+        if date == nil {
+            formatter.formatOptions = [.withInternetDateTime]
+            date = formatter.date(from: sampledAt)
+        }
+        guard let date, (0...3).contains(now.timeIntervalSince(date)) else { return "stale" }
+        return status
+    }
+
+    func summary(at now: Date) -> String {
+        let current = state(at: now)
+        guard current == "tracking" || current == "adjusting", let targetRpm, let actualRpm, actualRpm.isFinite else {
+            return ["waiting": "等待转速反馈", "stale": "转速反馈已过期", "stopped": "跟随监测已结束"][current] ?? "转速反馈不可用"
+        }
+        let label = current == "tracking" ? "跟随正常" : "正在调速"
+        return "已下发 \(targetRpm) · 实际 \(rpmText(actualRpm)) RPM · \(label)" + (pendingUpdate ? " · 目标更新中" : "")
     }
 }
 struct RuleHookRuntime: Decodable {

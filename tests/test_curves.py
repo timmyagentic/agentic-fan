@@ -102,10 +102,10 @@ class CurveTests(unittest.TestCase):
 
     def test_current_target_confirmation_ignores_old_target_receipts(self):
         # Exercise receipt consumption without starting a control thread.
-        import queue
-        control = rules.Control.__new__(rules.Control)
-        control.messages = queue.Queue(); control.rpm = 3200; control.confirmed = False
-        control.exit_code = None; control.sequence = 2
+        import threading
+        with patch.object(threading.Thread, 'start'):
+            control = rules.Control(0, 3200, True)
+        control.sequence = 2
         control.messages.put({'event': 'control_confirmed', 'data': {'target_rpm': 3000}})
         control.poll()
         self.assertFalse(control.confirmed)
@@ -114,7 +114,7 @@ class CurveTests(unittest.TestCase):
         self.assertFalse(control.confirmed, 'An earlier visit to the same RPM cannot confirm a new command')
         control.messages.put({'event': 'control_confirmed', 'data': {'target_rpm': 3200, 'sequence': 2}})
         control.poll()
-        self.assertTrue(control.confirmed)
+        self.assertFalse(control.confirmed, 'One-shot events without fresh observations cannot prove current tracking')
 
 
 class RetargetTests(unittest.TestCase):
