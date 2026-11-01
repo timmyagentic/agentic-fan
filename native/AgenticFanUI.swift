@@ -45,6 +45,9 @@ final class Monitor: ObservableObject {
     private var stopRulesCompletion: ((Bool) -> Void)?
     private var smokeStarted = false
     private var quitting = false
+    private var checkedService = false
+    private var serviceCommand: Command?
+    @Published var needsServiceApproval = false
     private lazy var rulesConfigPath: String? = {
         if let configured = ProcessInfo.processInfo.environment["AGENTICFAN_RULES_PATH"], !configured.isEmpty { return configured }
         return demo ? FileManager.default.temporaryDirectory.appendingPathComponent("agenticfan-demo-\(UUID().uuidString)/rules.json").path : nil
@@ -82,7 +85,12 @@ final class Monitor: ObservableObject {
         return "当前 Mac"
     }
     func start() {
-        guard watch == nil else { return }
+        guard watch == nil, !quitting else { return }
+        if !demo && !checkedService {
+            checkedService = true
+            checkService("reconcile") { [weak self] in self?.start() }
+            return
+        }
         error = nil
         runnerFinished = nil; runnerError = nil
         let task = Command(ruleArguments("run", ["--parent-watch"]), keepInputOpen: true)
@@ -136,44 +144,63 @@ final class Monitor: ObservableObject {
                 }
             })
         } catch { watch = nil; self.error = error.localizedDescription; status = "连接失败" }
-        refreshHelper()
+        if demo { refreshHelper() }
         if smoke {
             DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
                 if let self, !quitting { finishSmoke(false) }
             }
         }
     }
-    func refreshHelper() {
-        if demo { helperReady = true; helperStatus = "演示模式，不访问系统 Helper"; return }
-        let task = Command(["helper", "status"])
-        utility = task
+    private func checkService(_ action: String, completion: (() -> Void)? = nil) {
+        guard serviceCommand == nil else { return }
+        let task = Command(["helper", action])
+        serviceCommand = task
         do {
             try task.run(event: { [weak self] message in
                 guard let self else { return }
                 let data = message["data"] as? [String: Any] ?? [:]
-                helperReady = data["running"] as? Bool == true && data["compatible"] as? Bool == true
-                helperStatus = helperReady ? "后台服务已连接 · \(data["version"] as? String ?? "")" : "控扇服务需要安装或更新"
-            }, end: { _ in })
-        } catch { helperReady = false; helperStatus = error.localizedDescription }
+                helperReady = data["ready"] as? Bool == true
+                needsServiceApproval = data["state"] as? String == "requires_approval"
+                if let failure = message["error"] as? [String: Any] {
+                    helperStatus = failure["message"] as? String ?? "控扇服务暂不可用"
+                } else if helperReady {
+                    helperStatus = "控扇服务已就绪"
+                } else if data["state"] as? String == "development_build" {
+                    helperStatus = "开发构建可监测温度；真实控扇需使用已公证的 App"
+                } else if data["state"] as? String == "multiple_installations" {
+                    helperStatus = "发现两个 AgenticFan，请保留一个应用程序目录中的安装"
+                } else if needsServiceApproval {
+                    helperStatus = "请在系统设置中允许 AgenticFan 后台运行"
+                } else {
+                    helperStatus = "温度监测可用；调速需要授权"
+                }
+            }, end: { [weak self] _ in
+                self?.serviceCommand = nil
+                completion?()
+            })
+        } catch { serviceCommand = nil; helperReady = false; helperStatus = error.localizedDescription; completion?() }
+    }
+    func refreshHelper() {
+        if demo { helperReady = true; helperStatus = "演示模式，不访问系统服务"; return }
+        checkService("reconcile") { [weak self] in self?.resumeAfterServiceAuthorization() }
+    }
+    private func resumeAfterServiceAuthorization() {
+        // A newly approved service can unblock a saved configuration. Never
+        // clear a hardware, external-auto or failed-restoration pause this way.
+        if helperReady, let rules = snapshot?.rules, rules.automaticModeVerified == true,
+           rules.status == "paused", ["HELPER_NOT_INSTALLED", "SERVICE_NOT_READY", "HELPER_ACCESS_DENIED"].contains(rules.pauseCode ?? "") { retry() }
     }
     func installHelper(then: (() -> Void)? = nil) {
-        guard !busy else { return }
-        busy = true; error = nil; helperStatus = "等待系统认证…"
-        let task = Command(["helper", "install"])
-        utility = task
-        var ready = false
-        do {
-            try task.run(event: { [weak self] message in
-                let data = message["data"] as? [String: Any] ?? [:]
-                ready = data["running"] as? Bool == true && data["compatible"] as? Bool == true
-                if let detail = message["error"] as? [String: Any] { self?.error = detail["message"] as? String }
-            }, end: { [weak self] code in
-                guard let self else { return }
-                busy = false; helperReady = code == 0 && ready
-                helperStatus = helperReady ? "后台服务已连接" : "安装未完成，可重试"
-                if helperReady { then?() } else { error = error ?? "后台服务安装未完成。" }
-            })
-        } catch { busy = false; self.error = error.localizedDescription }
+        guard !busy, serviceCommand == nil else { return }
+        busy = true; error = nil; helperStatus = "正在检查控扇授权…"
+        checkService("install") { [weak self] in
+            guard let self else { return }
+            busy = false
+            if helperReady {
+                if let then { then() } else { resumeAfterServiceAuthorization() }
+            } else if needsServiceApproval { LoginItemSettings.shared.openSystemSettings() }
+            else { error = helperStatus }
+        }
     }
     func reloadRules() {
         guard !rulesLoading, !rulesSaving else { return }
@@ -308,7 +335,7 @@ final class Monitor: ObservableObject {
             }
         } else { stopRules(completion: completion) }
     }
-    func shutdown() { quitting = true; watch?.stop(); control?.stop(); utility?.stop(); rulesCommand?.stop() }
+    func shutdown() { quitting = true; serviceCommand?.stop(); watch?.stop(); control?.stop(); utility?.stop(); rulesCommand?.stop() }
     private func finishSmoke(_ ok: Bool) {
         shutdown()
         print(ok ? "AGENTICFAN_NATIVE_SMOKE_OK" : "AGENTICFAN_NATIVE_SMOKE_FAILED")
@@ -631,10 +658,10 @@ struct ServiceSettings: View {
             }
             Divider()
             Label(model.helperStatus, systemImage: model.helperReady ? "checkmark.circle" : "exclamationmark.circle")
-            Text("温度监测无需后台服务。首次调速或版本更新时，通过 macOS 系统认证安装受限 Helper。").font(.caption).foregroundStyle(.secondary)
+            Text("控扇服务随 App 一起更新。仅监测温度无需授权；首次调速时按 macOS 提示允许后台服务。").font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("检查状态") { model.refreshHelper() }.disabled(model.busy)
-                Button("安装或更新服务") { model.installHelper() }.disabled(model.busy || model.demo || model.helperReady)
+                Button(model.needsServiceApproval ? "打开系统设置" : "授权控扇") { model.installHelper() }.disabled(model.busy || model.demo || model.helperReady)
             }
             Divider()
             Text("关闭窗口后继续在菜单栏运行。退出应用时如有本应用发起的调速，会先确认恢复自动模式。").font(.caption).foregroundStyle(.secondary)
@@ -784,7 +811,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.performClose(nil)
         Monitor.shared.mainWindowRequest &+= 1
     }
-    func applicationDidBecomeActive(_ notification: Notification) { LoginItemSettings.shared.refresh() }
+    func applicationDidBecomeActive(_ notification: Notification) {
+        LoginItemSettings.shared.refresh()
+        if Monitor.shared.needsServiceApproval { Monitor.shared.refreshHelper() }
+    }
     private func verifyStartup() {
         func finish(_ ok: Bool) {
             Monitor.shared.shutdown()
@@ -847,6 +877,9 @@ struct AgenticFanApplication: App {
     @StateObject private var model = Monitor.shared
     @Environment(\.openWindow) private var openWindow
     init() {
+        let args = Array(CommandLine.arguments.dropFirst())
+        if args.count == 2 && args[0] == "--control-service" { exit(ControlService.command(args[1])) }
+        if args.count == 2 && args[0] == "--check-update" { exit(ControlService.canReplace(args[1]) ? 0 : 6) }
         if (CommandLine.arguments.contains("--smoke") || CommandLine.arguments.contains("--startup-smoke"))
             && !CommandLine.arguments.contains("--demo") {
             fputs("Native smoke testing requires --demo.\n", stderr)

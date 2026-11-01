@@ -20,6 +20,10 @@ from .protocol import emit, failure, success
 from .runtime import lock, runtime_directory
 
 
+class StopDuringReadback(Exception):
+    """Unwind a partially applied write through verified restoration."""
+
+
 def validate_duration(duration):
     if not isinstance(duration, (int, float)) or isinstance(duration, bool) or not math.isfinite(duration) or not 1 <= duration <= 3600:
         raise invalid("Duration must be finite and between 1 and 3600 seconds.")
@@ -41,7 +45,12 @@ def run_session(hw: Hardware, directory, indices, rpm, duration, experimental_ft
         try:
             with lock(directory, "write.lock"):
                 hw.validate_control(indices, rpm, experimental_ftst)
-                if wait_stop(0):
+                stop = wait_stop(0)
+                if stop:
+                    if not all(hw.mode(i) == "auto" for i in indices):
+                        raise AgenticFanError("RESTORE_UNCONFIRMED", "Fan mode changed before control started.", 7)
+                    output(success({"fans": indices, "reason": stop if isinstance(stop, str) else "cancelled",
+                                    "automatic_mode_verified": True, "target_observed": False}, hw.simulated, "control_finished"))
                     return
                 start = monotonic()
                 start_wall = wall_clock()
@@ -50,8 +59,9 @@ def run_session(hw: Hardware, directory, indices, rpm, duration, experimental_ft
                     elapsed = max(monotonic() - start, wall_clock() - start_wall)
                     if elapsed >= duration:
                         raise AgenticFanError("CONTROL_NOT_CONFIRMED", "Session expired while waiting for hardware readback.")
-                    if wait_stop(min(delay, duration - elapsed)):
-                        raise AgenticFanError("CONTROL_CANCELLED", "Control cancelled while waiting for hardware readback.", 130)
+                    stop = wait_stop(min(delay, duration - elapsed))
+                    if stop:
+                        raise StopDuringReadback(stop if isinstance(stop, str) else "cancelled")
                 armed = True
                 hw.apply(indices, rpm, experimental_ftst, wait=wait_apply)
             last_mono, last_wall = monotonic(), wall_clock()
@@ -110,9 +120,12 @@ def run_session(hw: Hardware, directory, indices, rpm, duration, experimental_ft
                                       target_rpm=rpm, tolerance_rpm=max(100, rpm * 0.08))
                 if elapsed >= duration:
                     break
-                if wait_stop(min(0.25, duration - elapsed)):
-                    reason = "cancelled"
+                stop = wait_stop(min(0.25, duration - elapsed))
+                if stop:
+                    reason = stop if isinstance(stop, str) else "cancelled"
                     break
+        except StopDuringReadback as stop:
+            reason, confirmed = str(stop), False
         except BaseException as exc:
             primary_error = exc
         finally:
@@ -197,18 +210,18 @@ def main():
     def wait_stop(timeout):
         nonlocal last_heartbeat
         if stopped:
-            return True
+            return "signal"
         if lease_seconds is not None and time.monotonic() - last_heartbeat >= lease_seconds:
-            return True
+            return "lease_expired"
         readable, _, _ = select.select([sys.stdin.fileno()], [], [], timeout)
         if readable:
             raw = os.read(sys.stdin.fileno(), 1024)
             if lease_seconds is not None and raw:
                 if updates.feed(raw):
                     last_heartbeat = time.monotonic()
-                return updates.stopped
-            return True  # Includes EOF after SIGKILL of the parent.
-        return stopped
+                return "cancelled" if updates.stopped else False
+            return "client_disconnected"  # EOF or non-leased caller stopping.
+        return "signal" if stopped else False
 
     def output(message):
         # Losing the consumer must not skip restoration.

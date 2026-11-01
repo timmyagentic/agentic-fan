@@ -44,7 +44,8 @@ class FakeControl:
     def poll(self):
         return self.exit_code is not None
 
-    def cancel(self):
+    def cancel(self, reason=None):
+        self.local_stop_reason = reason
         self.cancelled.set()
 
     def refresh(self):
@@ -174,6 +175,72 @@ class RulesTests(unittest.TestCase):
         self.assertEqual(state["status"], "active")
         self.assertEqual(runner.control.rpm, 5000)
 
+    def test_client_freshness_cancel_during_readback_recovers_only_after_two_fresh_samples(self):
+        runner = self.runner()
+        runner.tick(sample(), 0)
+        ended = runner.control
+        ended.local_stop_reason = "sample_timeout"
+        ended.error = {"code": "CONTROL_CANCELLED", "message": "cancelled while applying"}
+        ended.exit_code = 130
+        self.assertEqual(runner.tick(sample(), 5, fresh=False)["status"], "recovering")
+        self.assertIsNone(runner.control)
+        self.assertEqual(runner.tick(sample(), 6)["status"], "recovering")
+        self.assertEqual(runner.tick(sample(), 10)["status"], "recovering", "gap invalidates the streak")
+        state = runner.tick(sample(), 11)
+        self.assertEqual(state["status"], "active")
+        self.assertIsNot(runner.control, ended)
+        self.assertEqual(state["last_interruption"], "sample_timeout")
+
+    def test_disabling_during_lease_recovery_stays_disabled(self):
+        runner = self.runner(); runner.tick(sample(), 0)
+        runner.control.restored = True; runner.control.reason = "lease_expired"; runner.control.exit_code = 0
+        rules.save(self.path, config(enabled=False))
+        for now in (1, 2, 3):
+            self.assertEqual(runner.tick(sample(), now)["status"], "disabled")
+            self.assertIsNone(runner.control)
+
+    def test_disable_after_recovery_started_clears_wait_immediately(self):
+        runner = self.runner()
+        runner.tick(sample(), 0)
+        runner.control.restored = True
+        runner.control.reason = "lease_expired"
+        runner.control.exit_code = 0
+        self.assertEqual(runner.tick(sample(), 1)["status"], "recovering")
+        rules.save(self.path, config(enabled=False))
+        self.assertEqual(runner.tick(sample(), 2)["status"], "disabled")
+        self.assertIsNone(runner.control)
+        self.assertFalse(runner.recovering)
+
+    def test_final_receipt_can_arrive_after_snapshot_saw_our_manual_fan(self):
+        runner = self.runner()
+        runner.tick(sample(), 0)
+        runner.control.restored = True
+        runner.control.reason = "lease_expired"
+        runner.control.exit_code = 0
+        self.assertEqual(runner.tick(sample(mode="manual"), 1)["status"], "recovering")
+        self.assertEqual(runner.tick(sample(), 2)["status"], "recovering")
+        self.assertEqual(runner.tick(sample(), 3)["status"], "active")
+
+    def test_lease_expiry_recovers_but_external_stop_and_restore_failure_never_rearm(self):
+        for reason, error, exit_code, restored, mode, recover in [
+            ("lease_expired", None, 0, True, "auto", True),
+            ("external_auto", None, 0, True, "auto", False),
+            ("client_disconnected", None, 0, True, "auto", False),
+            ("signal", None, 0, True, "auto", False),
+            ("lease_expired", {"code":"RESTORE_FAILED","message":"failed"}, 7, False, "auto", False),
+            ("lease_expired", None, 0, False, "manual", False),
+            (None, {"code":"CONTROL_CANCELLED","message":"unknown cancellation"}, 130, True, "auto", False),
+        ]:
+            with self.subTest(reason=reason, error=error):
+                runner=self.runner(); runner.tick(sample(),0)
+                runner.control.restored=restored; runner.control.reason=reason
+                runner.control.error=error; runner.control.exit_code=exit_code
+                runner.tick(sample(mode=mode),1)
+                runner.tick(sample(),2)
+                state=runner.tick(sample(),3)
+                self.assertEqual(state["status"],"active" if recover else "paused")
+                self.assertEqual(runner.control is not None,recover)
+
 
 class RulesTransportTests(unittest.TestCase):
     def setUp(self):
@@ -270,6 +337,7 @@ class RulesTransportTests(unittest.TestCase):
             self.assertEqual(process.wait(timeout=5), 0)
             messages = [json.loads(line) for line in process.stdout.read().splitlines()]
             self.assertTrue(messages[-1]["data"]["automatic_mode_verified"])
+            self.assertEqual(messages[-1]["data"]["reason"], "lease_expired")
             self.assertEqual(json.loads((Path(self.env["AGENTICFAN_DEMO_DIR"]) / "state.json").read_text())["F0Md"], "00")
         finally:
             if process.poll() is None:

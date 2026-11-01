@@ -12,6 +12,9 @@ work=""
 stage=""
 mounted=0
 official_release=0
+isolated=0
+resume_service=false
+backup=""
 
 fail() { printf 'AgenticFan: %s\n' "$*" >&2; exit 1; }
 usage() {
@@ -40,7 +43,7 @@ while [ "$#" -gt 0 ]; do
         --agent) agent="$2" ;;
         --run-id) run_id="$2" ;;
         --dmg) dmg="$2" ;;
-        --user-root) user_root="$2" ;;
+        --user-root) isolated=1; user_root="$2" ;;
       esac
       shift 2 ;;
     *) fail "Unknown option: $1" ;;
@@ -129,6 +132,10 @@ if ! /usr/sbin/spctl --assess --type execute "$source_app" >&2; then
 fi
 
 app_parent="$user_root/Applications"
+if [ "$isolated" -eq 0 ] && [ -e /Applications/AgenticFan.app ]; then
+  [ ! -e "$app_parent/AgenticFan.app" ] || fail 'Found AgenticFan in both Applications folders; keep one installation before upgrading'
+  app_parent=/Applications
+fi
 destination="$app_parent/AgenticFan.app"
 /bin/mkdir -p "$app_parent"
 [ ! -L "$destination" ] || fail 'Existing AgenticFan.app is a symlink; it was not replaced'
@@ -148,14 +155,46 @@ if [ "$same" -eq 0 ]; then
   /usr/bin/ditto "$source_app" "$stage/AgenticFan.app"
   /usr/bin/codesign --verify --deep --strict "$stage/AgenticFan.app" >&2
   if [ -e "$destination" ]; then
+    if [ "$isolated" -eq 0 ] && [ -f "$stage/AgenticFan.app/Contents/Library/LaunchDaemons/io.github.timmyagentic.agenticfan.control.plist" ]; then
+      dev_service="$(/usr/bin/plutil -extract AgenticFanDevelopmentService raw -o - "$stage/AgenticFan.app/Contents/Info.plist")"
+      if [ "$dev_service" = true ] && { [ -f /Library/LaunchDaemons/io.github.timmyagentic.agenticfan.helper.plist ] || [ -f "$destination/Contents/Library/LaunchDaemons/io.github.timmyagentic.agenticfan.control.plist" ]; }; then
+        fail 'A development bundle cannot replace this control-service installation; use --user-root for isolated testing'
+      fi
+      "$stage/AgenticFan.app/Contents/MacOS/AgenticFanUI" --check-update "$destination" || fail 'Quit the existing AgenticFan app and retry; the original installation was kept'
+      if [ -f "$destination/Contents/Library/LaunchDaemons/io.github.timmyagentic.agenticfan.control.plist" ]; then
+        "$destination/Contents/MacOS/agenticfan" helper prepare-update > "$work/intent.json"
+        resume_service="$(/usr/bin/plutil -extract data.resume_after_update raw -o - "$work/intent.json")"
+      fi
+    fi
     backup="$app_parent/AgenticFan.previous.$(/bin/date +%Y%m%d%H%M%S)-$$.app"
-    /bin/mv "$destination" "$backup"
+    if ! /bin/mv "$destination" "$backup"; then
+      if [ "$resume_service" = true ]; then "$destination/Contents/MacOS/agenticfan" helper resume-update >&2; fi
+      fail 'Could not replace the previous app'
+    fi
     printf 'AgenticFan: previous application retained at %s\n' "$backup" >&2
   fi
-  /bin/mv "$stage/AgenticFan.app" "$destination"
+  if ! /bin/mv "$stage/AgenticFan.app" "$destination"; then
+    if [ -n "$backup" ]; then /bin/mv "$backup" "$destination"; fi
+    if [ "$resume_service" = true ]; then "$destination/Contents/MacOS/agenticfan" helper resume-update >&2; fi
+    fail 'Could not install the verified app'
+  fi
 fi
 executable="$destination/Contents/MacOS/agenticfan"
 "$executable" schema >/dev/null
+if [ "$isolated" -eq 0 ] && [ -f "$destination/Contents/Library/LaunchDaemons/io.github.timmyagentic.agenticfan.control.plist" ]; then
+  operation=reconcile
+  if [ "$resume_service" = true ]; then operation=resume-update; fi
+  if ! "$executable" helper "$operation" > "$work/service.json"; then
+    /bin/cat "$work/service.json" >&2
+    fail "App files were installed but service setup did not finish. Open AgenticFan to retry; existing rules and previous app are retained."
+  fi
+  service_state="$(/usr/bin/plutil -extract data.state raw -o - "$work/service.json")"
+  case "$service_state" in
+    requires_approval) printf '%s\n' 'AgenticFan: allow the background service in System Settings, then open AgenticFan.' >&2 ;;
+    authorization_required) printf '%s\n' 'AgenticFan: open the app to authorize fan control for this local user.' >&2 ;;
+    ready) printf '%s\n' 'AgenticFan: bundled fan control service is ready.' >&2 ;;
+  esac
+fi
 "$executable" agent install --target "$agent" --user-root "$user_root"
 "$executable" doctor
 printf 'AgenticFan: app, CLI, and Agent skill installed. Use %s now; new login shells can use agenticfan. Reload your Agent skills if needed.\n' "$user_root/.local/bin/agenticfan" >&2

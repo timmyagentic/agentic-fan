@@ -4,6 +4,8 @@
 
 提供温度监测、有限时长调速与可由 Agent 编辑的温度规则。面向 Apple Silicon，交付格式为 **DMG 内的 `AgenticFan.app`**，内含窗口、CLI 和所需运行时。用户不需要安装 Python，也不需要模型、API Key 或网络服务。
 
+**开发中的 0.4.6：控扇服务随 App 更新。** 首次调速在 App 内完成授权。短暂采样中断后，只有确认恢复系统自动、连续收到有效数据才会继续；手动恢复自动及硬件错误保持暂停。见[服务与迁移说明](docs/helper.md)。
+
 **0.4.5 更新：持续反馈曲线跟随状态。** 调速时显示同次采样的已下发目标与实际转速，正常跟随和等待新目标确认分别呈现；反馈过期或转速偏离会撤销正常状态，持续异常仍恢复系统自动模式。已有曲线节点与规则配置保留。详见[持续反馈说明](docs/temperature-rules.md#自定义温度转速曲线)。
 
 **0.4.3 更新：持续高温确认与自定义程序 Hook。** 每条规则可配置持续高温时间，真正触发后异步调用固定本机程序；提供默认仅预览的 Lark CLI 通知示例。配置兼容旧规则，Hook 默认关闭。详见[温度规则](docs/temperature-rules.md)。
@@ -22,7 +24,7 @@
 
 **菜单栏与登录启动。** 应用只在菜单栏驻留，不显示 Dock 图标；首次正常打开默认注册当前用户的登录项，可在设置关闭。启动时不弹出主窗口，通过菜单栏“打开主窗口”访问完整界面。已启用的温度规则会随应用恢复运行；只运行安装器或 CLI 不会注册登录项。
 
-**原生界面与监测。** 已包含全屏菜单栏弹窗修复。 原生 SwiftUI 主窗口与菜单栏弹窗保留紧凑布局。 紧凑双栏、搜索与测点详情、有限时调速弹窗、实际/目标转速和倒计时共用同一条后台数据流。关闭主窗口后在菜单栏继续运行；退出前如有本应用发起的调速，须确认恢复自动模式。 本机 M4 的 65 个测点可识别为 CPU、GPU、内存、SSD、无线网络与电源管理，其余测点保留为未知。命名依据与范围见 [传感器名称说明](docs/sensor-labels.md)。首次授权安装 Helper 后，Agent 无需 sudo 或重复弹窗即可控扇。 修复 SMC 异步读回导致的调速/恢复误报。已在 Mac16,10、macOS 27.0 上验证 1600 RPM 短时调速、到期恢复、主动恢复与 CLI 被终止后的恢复；其他机型、睡眠及 Ftst 路径仍未验收。详见 [硬件验收记录](docs/hardware-validation.md) 和 [温度有效性说明](docs/temperature-validation.md)。
+**原生界面与监测。** 已包含全屏菜单栏弹窗修复。 原生 SwiftUI 主窗口与菜单栏弹窗保留紧凑布局。 紧凑双栏、搜索与测点详情、有限时调速弹窗、实际/目标转速和倒计时共用同一条后台数据流。关闭主窗口后在菜单栏继续运行；退出前如有本应用发起的调速，须确认恢复自动模式。 本机 M4 的 65 个测点可识别为 CPU、GPU、内存、SSD、无线网络与电源管理，其余测点保留为未知。命名依据与范围见 [传感器名称说明](docs/sensor-labels.md)。控扇服务获准后，Agent 无需 sudo 或重复弹窗即可控扇。 修复 SMC 异步读回导致的调速/恢复误报。已在 Mac16,10、macOS 27.0 上验证 1600 RPM 短时调速、到期恢复、主动恢复与 CLI 被终止后的恢复；其他机型、睡眠及 Ftst 路径仍未验收。详见 [硬件验收记录](docs/hardware-validation.md) 和 [温度有效性说明](docs/temperature-validation.md)。
 
 ## 给 Agent 一句话安装
 
@@ -44,7 +46,7 @@ DMG 构建目标为 **Apple Silicon、macOS 15+**。取得构建产物后：
 
 1. 打开 `AgenticFan-<version>-arm64.dmg`，把 `AgenticFan.app` 拖入 `Applications`。
 2. 双击应用后，点击菜单栏 AgenticFan 图标查看概览；选择“打开主窗口”查看温度测点、风扇转速和模式。
-3. 选择风扇、目标 RPM 与持续秒数，点击设置；首次控扇时由 macOS 请求管理员授权安装 Helper，后续无需重复授权。也可以点击“全部恢复自动”。
+3. 选择风扇、目标 RPM 与持续秒数，点击设置；首次控扇时根据 App 提示完成系统授权。也可以点击“全部恢复自动”。
 
 正式 Release 使用 Developer ID 签名、Apple 公证与装订票据，安装器会验证镜像、校验和、应用签名与 Gatekeeper。Actions 仍提供带 `-dev` 的开发包，不能代替正式 Release；构建方法见 [macOS 打包说明](docs/macos-packaging.md)。仓库中的 Python 包用于开发。
 
@@ -58,7 +60,7 @@ DMG 构建目标为 **Apple Silicon、macOS 15+**。取得构建产物后：
 "/Applications/AgenticFan.app/Contents/MacOS/agenticfan" watch --interval 1 --count 10
 ```
 
-读取不要求管理员权限。首次启用控扇，以普通用户运行 `agenticfan helper install` 并完成一次系统授权；后续 Agent 直接调用 CLI，无需 `sudo`。升级 Helper 或卸载时可能再次需要授权。先读取 `fans` 返回的每个风扇的 `min_rpm`、`max_rpm` 和当前模式，再选择范围内的正整数 RPM；下面的 3000 只是示例值。
+读取不要求管理员权限。首次控扇时按 App 或 CLI 的系统授权提示操作；服务已内置，升级与 App 一起进行，无需单独安装。先读取 `fans` 返回的每个风扇的 `min_rpm`、`max_rpm` 和当前模式，再选择范围内的正整数 RPM；下面的 3000 只是示例值。
 
 ```sh
 "/Applications/AgenticFan.app/Contents/MacOS/agenticfan" fans set --fan 0 --rpm 3000 --duration 30
@@ -97,7 +99,7 @@ python3 -m agenticfan --demo fans
 | `fans [list]` | 当前/目标/最低/最高 RPM、模式 | 只读，单个 JSON |
 | `snapshot` | 一次采集温度与风扇 | 只读，单个 JSON |
 | `watch --interval N [--count N]` | 连续快照 | 只读，NDJSON |
-| `helper install/status/uninstall` | 安装、查看、卸载受限后台服务 | 安装/卸载需系统授权；状态只读 |
+| `helper install/status/uninstall` | 启用、查看、注销 App 内置的受限控扇服务 | 安装/卸载需系统授权；状态只读 |
 | `fans set --fan ID --rpm N --duration N` | 有时限的固定转速 | 启用 Helper 后普通用户调用，NDJSON |
 | `fans auto --fan ID` | 恢复自动，`ID` 也可为 `all` | 启用 Helper 后普通用户调用，单个 JSON |
 
@@ -132,9 +134,9 @@ SMC 模式和目标值可能异步生效；每步最多等待 3 秒读回，超�
 
 锁只协调本工具，不协调其他风扇应用；验收与使用时应避免多个控制程序同时运行。杀死独立控制进程、内核调用永久阻塞、系统崩溃、固件行为或其他控制程序竞争，都可能妨碍恢复。Helper 由 launchd 管理；仍没有睡眠前通知处理；检测到恢复运行后的采样间隔异常会结束会话。不要把它当作硬件热保护机制。
 
-真实写入的运行锁在 root 私有的 `/var/run/agenticfan`。Helper 文件为 root 所有，socket 仅对安装时授权的本机 UID 开放，并通过内核凭据复核调用者。接口仅包含状态、有限控扇和恢复，不接受命令、程序路径或任意 SMC 键；不配置免密 sudo，不访问网络。详情见 [Helper 与权限边界](docs/helper.md)。
+真实写入的运行锁在 root 私有的 `/var/run/agenticfan`。服务的工作程序使用根用户保护的运行缓存；控扇仅对已授权的本机 UID 开放，并通过内核凭据复核调用者。硬件操作仅包含有限控扇和恢复，不接受命令、程序路径或任意 SMC 键；不配置免密 sudo，不访问网络。详情见 [Helper 与权限边界](docs/helper.md)。
 
-关闭主窗口后，控扇会话继续在菜单栏运行。正常退出应用时，如有本应用发起且尚未确认恢复的控扇会话，会先要求恢复自动模式。GUI 首次安装 Helper 后启动普通权限 CLI；强制结束整个应用时，已有会话仍可能运行至指定时限。期限与恢复逻辑由独立控扇进程执行。
+关闭主窗口后，控扇会话继续在菜单栏运行。正常退出应用时，如有本应用发起且尚未确认恢复的控扇会话，会先要求恢复自动模式。GUI 与 CLI 以普通用户运行；强制结束整个应用时，已有会话仍可能运行至指定时限。期限与恢复逻辑由独立控扇进程执行。
 
 ## 开发验证
 

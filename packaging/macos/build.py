@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import hashlib
 import json
 import os
 from pathlib import Path
 import platform
 import plistlib
+import re
 import runpy
 import shutil
 import struct
@@ -21,6 +23,18 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def run(*args, **kwargs):
     return subprocess.run([str(arg) for arg in args], check=True, **kwargs)
+
+
+def verify_python_target(library):
+    # PyInstaller embeds this exact library in both the CLI and the root worker.
+    # Changing MACOSX_DEPLOYMENT_TARGET cannot lower a prebuilt dylib's minimum.
+    result = run("xcrun", "vtool", "-arch", "arm64", "-show-build", library,
+                 capture_output=True, text=True)
+    targets = re.findall(r"^\s*minos\s+([\d.]+)\s*$", result.stdout, re.MULTILINE)
+    if not targets or any(tuple(map(int, t.split("."))) > (15, 0, 0) for t in targets):
+        raise RuntimeError(f"Embedded Python must support macOS 15.0 (found {', '.join(targets) or 'unknown'}). "
+                           "Use a compatible arm64 Python distribution before packaging.")
+    return targets[0]
 
 
 def hook_smoke(executable: Path, directory: Path, env):
@@ -71,10 +85,18 @@ def curve_smoke(executable: Path, directory: Path, env):
                      cwd=directory, capture_output=True, text=True, timeout=20)
         messages = [json.loads(line) for line in result.stdout.splitlines()]
         assert messages and all(m['ok'] and m['simulated'] for m in messages)
-        samples = [m['data']['rules'] for m in messages if m.get('event') == 'sample']
+        frames = [m['data'] for m in messages if m.get('event') == 'sample']
+        samples = [f['rules'] for f in frames]
         targets = [s['desired_rpm'] for s in samples]
         assert targets[0] == 1800 and targets[-1] == 1200 and len(set(targets)) > 2
-        assert all(abs(a - b) < 220 for a, b in zip(targets, targets[1:]))
+        # The nominal sampling interval is one second; the real interval can
+        # differ on a busy machine. Check RPM/second against the timestamps
+        # taken before evaluation, retaining the two-second catch-up cap.
+        times = [datetime.fromisoformat(f['sensors'][0]['sampled_at']) for f in frames]
+        rate = document['curve']['ramp_rpm_per_second']
+        for i in range(1, len(targets)):
+            dt = (times[i] - times[i-1]).total_seconds()
+            assert 0 < dt and abs(targets[i] - targets[i-1]) <= rate * min(2, dt + .05) + 1, (targets, times)
         assert any(s['control_feedback']['status'] == 'tracking' and s['control_feedback']['pending_update']
                    and not s['control_confirmed'] for s in samples if s.get('control_feedback'))
         assert samples[-1]['control_confirmed'] and messages[-1]['data']['automatic_mode_verified']
@@ -89,6 +111,9 @@ def smoke(executable: Path, directory: Path, gui=True):
                AGENTICFAN_RULES_PATH=str(directory / "demo/rules.json"), PATH="/usr/bin:/bin:/usr/sbin:/sbin")
     for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
         env.pop(key, None)
+    run(executable.parent / "AgenticFanService", "--verify-worker", cwd=directory, env=env, timeout=15)
+    service = json.loads(run(executable.parent / "AgenticFanControlWorker", "--service-info", cwd=directory, env=env, capture_output=True, text=True, timeout=20).stdout)
+    assert service["protocol"] == 2
     for arguments in (
         ["schema"], ["--demo", "snapshot"],
         ["--demo", "fans", "set", "--fan", "all", "--rpm", "3000", "--duration", "1"],
@@ -133,6 +158,35 @@ def smoke(executable: Path, directory: Path, gui=True):
             raise RuntimeError(f"Native menu-bar startup failed: {startup.stdout}\n{startup.stderr}")
 
 
+SERVICE_PLIST = 'io.github.timmyagentic.agenticfan.control.plist'
+
+
+def bundle_service(app, work, identity, env):
+    """Keep the user CLI fast; bundle a dedicated one-file worker for root."""
+    macos = app / 'Contents/MacOS'
+    run(sys.executable, '-m', 'PyInstaller', '--onefile', '--clean', '--noconfirm',
+        '--name', 'AgenticFanControlWorker', '--target-arch', 'arm64',
+        '--specpath', work / 'service-spec', '--workpath', work / 'service-build',
+        '--distpath', work / 'service-product', '--paths', ROOT,
+        *(['--codesign-identity', identity] if identity else []),
+        ROOT / 'packaging/macos/service_launcher.py', cwd=ROOT, env=env)
+    worker = macos / 'AgenticFanControlWorker'
+    shutil.copy2(work / 'service-product' / worker.name, worker)
+    signing = ['--options', 'runtime', '--timestamp'] if identity else []
+    run('codesign', '--force', '--sign', identity or '-', *signing, worker)
+    digest = hashlib.sha256(worker.read_bytes()).hexdigest()
+    bootstrap = macos / 'AgenticFanService'
+    run('xcrun', 'clang', '-O2', '-Wall', '-Werror', '-Wno-deprecated-declarations',
+        '-target', 'arm64-apple-macos15.0', f'-DWORKER_SHA256="{digest}"',
+        ROOT / 'native/ServiceBootstrap.c', '-o', bootstrap)
+    run('codesign', '--force', '--sign', identity or '-', *signing, bootstrap)
+    definitions = app / 'Contents/Library/LaunchDaemons'
+    definitions.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / 'packaging/macos' / SERVICE_PLIST, definitions / SERVICE_PLIST)
+    run(bootstrap, '--verify-worker')
+    return digest
+
+
 def notarize(path: Path, profile: str):
     run("xcrun", "notarytool", "submit", path, "--keychain-profile", profile, "--wait")
 
@@ -153,6 +207,8 @@ def main(argv=None):
         if not shutil.which(tool):
             parser.error(f"Required macOS build tool is missing: {tool}")
     import PyInstaller
+    from PyInstaller.depend.bindepend import get_python_library_path
+    python_minos = verify_python_target(get_python_library_path())
 
     version = runpy.run_path(str(ROOT / "agenticfan" / "__init__.py"))["__version__"]
     flavor = "" if args.notary_profile else "-signed-unnotarized" if args.identity else "-dev"
@@ -186,6 +242,8 @@ def main(argv=None):
         info_path = app / "Contents/Info.plist"
         info = plistlib.loads(info_path.read_bytes())
         info['CFBundleExecutable'] = 'AgenticFanUI'
+        info['AgenticFanDevelopmentService'] = not bool(args.notary_profile)
+        info['AgenticFanServiceBuild'] = bundle_service(app, work, args.identity, env)
         info_path.write_bytes(plistlib.dumps(info))
         signing = ["--options", "runtime", "--timestamp"] if args.identity else []
         run("codesign", "--force", "--sign", args.identity or "-", *signing, executable)
@@ -238,9 +296,9 @@ def main(argv=None):
     dmg.with_suffix(".dmg.sha256").write_text(f"{digest}  {dmg.name}\n")
     metadata = {
         "artifact": dmg.name, "version": version, "architecture": "arm64", "minimum_macos": "15.0",
-        "python": platform.python_version(), "pyinstaller": PyInstaller.__version__,
+        "python": platform.python_version(), "python_minimum_macos": python_minos, "pyinstaller": PyInstaller.__version__,
         "signing": "developer_id" if args.identity else "ad_hoc", "notarized": bool(args.notary_profile),
-        "verified": ["project_license", "codesign", "hdiutil", "mounted_app", "bundled_cli", "hook_file_workflow", "temperature_curve_workflow", "demo_guardian", "demo_gui", "demo_temperature_quality", "demo_menu_bar_startup"],
+        "verified": ["bundled_service_digest", "isolated_service_entry", "project_license", "codesign", "hdiutil", "mounted_app", "bundled_cli", "hook_file_workflow", "temperature_curve_workflow", "demo_guardian", "demo_gui", "demo_temperature_quality", "demo_menu_bar_startup"],
         "hardware_verified": False, "sha256": digest,
     }
     dmg.with_suffix(".build.json").write_text(json.dumps(metadata, indent=2) + "\n")

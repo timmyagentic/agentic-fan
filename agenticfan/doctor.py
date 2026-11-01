@@ -18,9 +18,9 @@ def diagnose(demo=False):
               "write_requires_root": False, "hardware_write_requires_privilege": not demo,
               "fan_count": 0, "warnings": [], "errors": []}
     if not demo:
-        from .helper import status
-        report["helper"] = status()
-        report["control_ready"] = bool(report["helper"].get("running") and report["helper"].get("compatible"))
+        from .helper_install import describe
+        report["helper"] = describe()
+        report["control_ready"] = bool(report["helper"].get("ready"))
     hw = None
     sensors = []
     try:

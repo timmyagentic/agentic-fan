@@ -37,7 +37,7 @@ def parser():
     commands.add_parser("capabilities", help="inspect available hardware interfaces")
     commands.add_parser("doctor", help="produce read-only installation and hardware diagnostics")
     helper = commands.add_parser("helper", help="install, inspect or remove the local privileged helper")
-    helper.add_argument("helper_action", choices=("install", "status", "uninstall"))
+    helper.add_argument("helper_action", choices=("install", "status", "uninstall", "reconcile", "prepare-update", "resume-update"))
     agent = commands.add_parser("agent", help="install the user-local CLI and Agent skill")
     integration = agent.add_subparsers(dest="agent_action", required=True)
     install = integration.add_parser("install", help="configure this bundled app for Codex or Claude Code")
@@ -203,8 +203,8 @@ def main(argv=None):
             if args.demo:
                 raise invalid("Helper management cannot be combined with --demo.")
             if args.helper_action == "status":
-                from .helper import status
-                emit(success(status()))
+                from .helper_install import describe
+                emit(success(describe()))
             else:
                 from .helper_install import manage
                 emit(success(manage(args.helper_action)))
@@ -283,6 +283,12 @@ def main(argv=None):
                     hw.close()
                     hw = None
                     from .helper import request
+                    from .helper_install import describe, manage
+                    if not describe().get('ready'):
+                        service = manage('install')
+                        if not service.get('ready'):
+                            raise AgenticFanError('SERVICE_NOT_READY', 'Authorize fan control in AgenticFan and macOS System Settings.', 4,
+                                                  service_state=service.get('state'))
                     parameters = {"fans": indices, "experimental_ftst": args.experimental_ftst}
                     if args.action == "set":
                         parameters.update(rpm=args.rpm, duration=args.duration)

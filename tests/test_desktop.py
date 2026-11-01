@@ -57,19 +57,13 @@ class DesktopTests(unittest.TestCase):
         reply = success({"automatic_mode_verified": True})
         completed = subprocess.CompletedProcess([], 0, json.dumps(reply) + "\r", "")
         with patch.object(sys, "frozen", True, create=True), patch.object(sys, "platform", "darwin"), \
-                patch.object(sys, "executable", executable), patch("agenticfan.helper.status", return_value={"running": True, "compatible": True}), \
+                patch.object(sys, "executable", executable), patch("agenticfan.helper.status", return_value={"running": True, "compatible": True, "ready": True}), \
                 patch("agenticfan.helper_install.manage") as manage, patch("agenticfan.gui.subprocess.run", return_value=completed) as run:
             gui.run_control(["fans", "auto", "--fan", "all"], demo=False, timeout=10)
         command = run.call_args.args[0]
         self.assertEqual(command, [executable, "fans", "auto", "--fan", "all"])
         manage.assert_not_called()
         self.assertNotIn("shell", run.call_args.kwargs)
-
-    @unittest.skipUnless(sys.platform == "darwin", "Requires the macOS AppleScript compiler")
-    def test_authorization_script_compiles_without_requesting_privileges(self):
-        with tempfile.TemporaryDirectory() as directory:
-            subprocess.run(["/usr/bin/osacompile", "-o", str(Path(directory) / "authorization.scpt"),
-                            "-e", gui.AUTHORIZATION_SCRIPT], check=True, capture_output=True, text=True)
 
     def test_gui_does_not_claim_restore_if_child_only_started(self):
         started = success({"rpm": 3000}, simulated=True, event="control_started")

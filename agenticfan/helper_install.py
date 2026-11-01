@@ -1,190 +1,138 @@
-"""One-time, administrator-authorized installation of a root-owned runtime.
+"""User-side lifecycle for the service shipped in AgenticFan.app.
 
-Never configure sudoers or retain credentials. Normal hardware requests do not
-invoke this module. Updates/removal require the same explicit admin operation.
+Read-only installations never register a daemon. A previous opt-in is reconciled
+on upgrade; system approval and the grant to a particular local user are distinct.
 """
-from __future__ import annotations
-
 import json
 import os
 from pathlib import Path
 import plistlib
-import pwd
-import shutil
 import subprocess
 import sys
-import tempfile
 import time
 
-from . import __version__
+from . import helper
 from .errors import AgenticFanError, invalid
-from .helper import APP, BASE, CONFIG, EXECUTABLE, LABEL, PLIST, SOCKET, SOCKET_DIRECTORY, check_root_path
-from .runtime import lock, runtime_directory
-
-AUTHORIZATION_SCRIPT = '''on run argv
-    set commandText to ""
-    repeat with argument in argv
-        set commandText to commandText & quoted form of (argument as text) & " "
-    end repeat
-    return do shell script commandText with administrator privileges
-end run'''
+from .service_auth import administrator_form
 
 
-def run(*arguments, check=True):
-    return subprocess.run([str(x) for x in arguments], check=check, capture_output=True, text=True)
+def native(action):
+    executable = Path(sys.executable).parent / 'AgenticFanUI'
+    result = subprocess.run([str(executable), '--control-service', action],
+                            capture_output=True, text=True, timeout=60)
+    try:
+        report = json.loads(result.stdout)
+    except ValueError:
+        raise AgenticFanError('SERVICE_REGISTRATION_FAILED', 'Could not read the macOS service state.') from None
+    if result.returncode:
+        raise AgenticFanError('SERVICE_REGISTRATION_FAILED', report.get('message', 'macOS rejected the registration.'))
+    return report['state']
 
 
-def stop_helper():
-    """bootout returns before launchd has removed the job; wait before replacing it."""
-    run('/bin/launchctl', 'bootout', 'system/' + LABEL, check=False)
-    deadline = time.monotonic() + 10
+def describe():
+    report = helper.status()
+    if sys.platform == 'darwin' and getattr(sys, 'frozen', False) and os.geteuid() != 0:
+        registration = native('status')
+        report['registration'] = registration
+        if registration != 'enabled':
+            report.update(ready=False, state=registration)
+    return report
+
+
+def bundle_build():
+    info = Path(sys.executable).parents[1] / 'Info.plist'
+    return plistlib.loads(info.read_bytes())['AgenticFanServiceBuild']
+
+
+def rpc(op, **fields):
+    messages = []
+    code = helper.request(op, output=messages.append, **fields)
+    if code or not messages or not messages[-1].get('ok'):
+        error = messages[-1].get('error', {}) if messages else {}
+        raise AgenticFanError(error.get('code', 'SERVICE_NOT_READY'),
+                              error.get('message', 'The control service did not acknowledge the request.'), code or 5)
+    return messages[-1]['data']
+
+
+def wait_service(expected_build=None):
+    deadline = time.monotonic() + 8
     while True:
-        state = run('/bin/launchctl', 'print', 'system/' + LABEL, check=False)
-        if state.returncode in (3, 113):  # ESRCH / launchd service-not-found
-            return
-        if state.returncode != 0:
-            raise AgenticFanError('HELPER_STOP_FAILED', 'Cannot verify that the existing helper has stopped.', 4)
-        if time.monotonic() >= deadline:
-            raise AgenticFanError('HELPER_STOP_FAILED', 'The existing helper did not stop within ten seconds.', 4)
-        time.sleep(.1)
+        state = helper.status()
+        if state.get('running') and (expected_build is None or state.get('service_build') == expected_build):
+            return state
+        if (state.get('error') or {}).get('code') == 'HELPER_ACCESS_DENIED' or time.monotonic() >= deadline:
+            raise AgenticFanError('SERVICE_NOT_READY', (state.get('error') or {}).get('message', 'Control service is not ready.'))
+        time.sleep(.15)
 
 
-def launch_config():
-    return {'Label': LABEL, 'ProgramArguments': [str(EXECUTABLE), '--internal-helper'],
-            'UserName': 'root', 'RunAtLoad': True, 'KeepAlive': True,
-            'AbandonProcessGroup': True, 'ThrottleInterval': 5, 'WorkingDirectory': '/',
-            'EnvironmentVariables': {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'HOME': '/var/root',
-                                     'PYINSTALLER_RESET_ENVIRONMENT': '1'}}
+def previous_opt_in():
+    if not helper.LEGACY_PLIST.exists():
+        return False
+    # Do not resurrect a disabled legacy daemon merely because its plist exists.
+    return subprocess.run(['/bin/launchctl', 'print', 'system/' + helper.LEGACY_LABEL],
+                          capture_output=True, timeout=5).returncode == 0
 
 
-def secure_bundle(bundle):
-    # PyInstaller uses relative symlinks within the bundle. Reject external links
-    # before changing ownership; never follow a user-supplied path out of staging.
-    root = bundle.resolve()
-    paths = [bundle, *bundle.rglob('*')]
-    for path in paths:
-        if path.is_symlink():
-            if not path.resolve().is_relative_to(root):
-                raise invalid('Helper bundle contains an external symlink.')
-        elif not (path.is_dir() or path.is_file()):
-            raise invalid('Helper bundle contains a non-regular file.')
-    for path in paths:
-        os.chown(path, 0, 0, follow_symlinks=False)
-        if not path.is_symlink():
-            mode = path.stat().st_mode
-            os.chmod(path, (mode & 0o755) | (0o755 if path.is_dir() else 0o444))
-
-
-def installed_owner():
-    if CONFIG.exists():
-        check_root_path(CONFIG)
-        return json.loads(CONFIG.read_text())['authorized_uid']
-    return None
-
-
-def install_privileged(uid):
-    if os.geteuid() != 0 or not getattr(sys, 'frozen', False):
-        raise AgenticFanError('PERMISSION_DENIED', 'Helper installation requires the bundled app and administrator authorization.', 4)
-    if type(uid) is not int or uid < 501:
-        raise invalid('Authorize a regular local user.')
-    pwd.getpwuid(uid)  # refuse non-existent accounts
-    source = Path(sys.executable).resolve().parents[2]
-    info = plistlib.loads((source / 'Contents/Info.plist').read_bytes())
-    if info.get('CFBundleIdentifier') != 'io.github.timmyagentic.agenticfan':
-        raise invalid('Unexpected application bundle.')
-    run('/usr/bin/codesign', '--verify', '--deep', '--strict', source)
-    # Validate trusted parent directories before creating or replacing files.
-    for parent in (Path('/Library'), Path('/Library/Application Support'), PLIST.parent):
-        check_root_path(parent, directory=True)
-    BASE.mkdir(mode=0o755, exist_ok=True)
-    check_root_path(BASE, directory=True)
-    if installed_owner() not in (None, uid):
-        raise AgenticFanError('HELPER_ACCESS_DENIED', 'Helper belongs to another local user. Remove it explicitly before changing ownership.', 4)
-    with lock(runtime_directory(False), 'session.lock', blocking=False):
-        with tempfile.TemporaryDirectory(prefix='.install-', dir=BASE) as temporary:
-            staged = Path(temporary) / 'Helper.app'
-            shutil.copytree(source, staged, symlinks=True)
-            secure_bundle(staged)
-            run('/usr/bin/codesign', '--verify', '--deep', '--strict', staged)
-            if APP.exists(): check_root_path(APP, directory=True)
-            old = BASE / 'Helper.previous.app'
-            if old.exists():
-                check_root_path(old, directory=True)
-                shutil.rmtree(old)
-            previous_config = CONFIG.read_bytes() if CONFIG.exists() else None
-            previous_plist = PLIST.read_bytes() if PLIST.exists() else None
-            if PLIST.exists(): check_root_path(PLIST)
-            stop_helper()
-            if APP.exists(): APP.rename(old)
-            try:
-                staged.rename(APP)
-                CONFIG.write_text(json.dumps({'authorized_uid': uid, 'version': __version__}) + '\n')
-                os.chmod(CONFIG, 0o600)
-                PLIST.write_bytes(plistlib.dumps(launch_config()))
-                os.chmod(PLIST, 0o644)
-                run('/bin/launchctl', 'enable', 'system/' + LABEL)
-                run('/bin/launchctl', 'bootstrap', 'system', PLIST)
-                from .helper import status
-                deadline = time.monotonic() + 10
-                while time.monotonic() < deadline:
-                    current = status()
-                    if current.get('running') and current.get('compatible'):
-                        return {**current, 'authorized_uid': uid, 'hardware_settings_changed': False}
-                    time.sleep(.2)
-                raise AgenticFanError('HELPER_START_FAILED', 'Installed helper did not become ready.')
-            except Exception:
-                stop_helper()
-                if APP.exists(): shutil.rmtree(APP)
-                if old.exists(): old.rename(APP)
-                if previous_config is not None: CONFIG.write_bytes(previous_config)
-                else: CONFIG.unlink(missing_ok=True)
-                if previous_plist is not None:
-                    PLIST.write_bytes(previous_plist)
-                    run('/bin/launchctl', 'bootstrap', 'system', PLIST, check=False)
-                else: PLIST.unlink(missing_ok=True)
-                raise
-
-
-def uninstall_privileged(uid):
-    if os.geteuid() != 0:
-        raise AgenticFanError('PERMISSION_DENIED', 'Administrator authorization is required.', 4)
-    if not BASE.exists(): return {'installed': False}
-    check_root_path(BASE, directory=True)
-    if installed_owner() not in (None, uid):
-        raise AgenticFanError('HELPER_ACCESS_DENIED', 'Helper belongs to another user.', 4)
-    with lock(runtime_directory(False), 'session.lock', blocking=False):
-        stop_helper()
-        if PLIST.exists():
-            check_root_path(PLIST)
-            PLIST.unlink()
-        for bundle in (APP, BASE / 'Helper.previous.app'):
-            if bundle.exists():
-                check_root_path(bundle, directory=True)
-                shutil.rmtree(bundle)
-        CONFIG.unlink(missing_ok=True)
-        if SOCKET_DIRECTORY.exists():
-            check_root_path(SOCKET_DIRECTORY, directory=True)
-            SOCKET.unlink(missing_ok=True)
-            SOCKET_DIRECTORY.rmdir()
-    return {'installed': False, 'hardware_settings_changed': False}
+def suspend(registration):
+    if registration == 'enabled':
+        state = wait_service()
+        if state['state'] != 'authorization_required':
+            rpc('drain')  # refuses new writes during the unregister window
+        try:
+            native('unregister')
+        except Exception:
+            if state['state'] != 'authorization_required':
+                try: rpc('resume')
+                except (AgenticFanError, OSError): pass  # original unregister error is authoritative
+            raise
+    # A disabled/pending registration is a system choice. Leave it untouched.
 
 
 def manage(action):
-    if sys.platform != 'darwin' or not getattr(sys, 'frozen', False):
-        raise invalid('Run helper installation/removal using the installed AgenticFan.app CLI on macOS.')
-    if os.geteuid() == 0:
-        raise invalid('Run helper install as your normal user; the system will request authorization once.')
-    if action == 'install':
-        from .helper import status
-        current = status()
-        if current.get('running') and current.get('compatible'):
-            return current  # idempotent; never prompt if already enabled
-    command = [sys.executable, '--internal-helper-' + action, str(os.getuid())]
-    result = run('/usr/bin/osascript', '-e', AUTHORIZATION_SCRIPT, *command, check=False)
-    if result.returncode:
-        raise AgenticFanError('HELPER_INSTALL_FAILED', 'System authorization or helper setup failed.', 4,
-                          diagnostic=result.stderr.strip())
-    messages = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
-    if not messages or not messages[-1].get('ok'):
-        raise AgenticFanError('HELPER_INSTALL_FAILED', 'Helper did not confirm setup.', 4)
-    return messages[-1]['data']
+    if sys.platform != 'darwin' or not getattr(sys, 'frozen', False) or os.geteuid() == 0:
+        raise invalid('Use the installed AgenticFan app as your normal user.')
+    registration = native('status')
+    if registration not in ('enabled', 'requires_approval', 'not_registered', 'not_found'):
+        if action in ('uninstall', 'resume-update'):
+            raise AgenticFanError('SERVICE_NOT_READY', 'Cannot manage a service from this app location or build.', service_state=registration)
+        return {'registration': registration, 'state': registration, 'running': False, 'ready': False, 'resume_after_update': False}
+    if action == 'prepare-update':
+        suspend(registration)
+        return {'resume_after_update': registration == 'enabled', 'previous_state': registration}
+    if action == 'uninstall':
+        if registration == 'enabled':
+            state = wait_service()
+            if state['state'] == 'migration_required':
+                rpc('migrate')
+            if state['state'] != 'authorization_required':
+                with administrator_form() as proof:
+                    rpc('revoke', authorization=proof)
+        if helper.LEGACY_PLIST.exists():
+            raise AgenticFanError('SERVICE_MIGRATION_REQUIRED', 'Authorize the app to migrate the previous service first.')
+        if registration in ('enabled', 'requires_approval'):
+            native('unregister')
+        return {'registered': False, 'running': False, 'ready': False, 'state': 'not_registered'}
+    if action not in ('install', 'reconcile', 'resume-update'):
+        raise invalid('Unknown service action.')
+    if registration in ('not_registered', 'not_found') and (
+            action in ('install', 'resume-update') or previous_opt_in()):
+        registration = native('register')
+    if registration != 'enabled':
+        return {'registration': registration, 'state': registration, 'running': False, 'ready': False}
+    state = wait_service()
+    if state.get('service_build') != bundle_build():
+        # Finder replacement may have retained an old process. Only refresh an
+        # idle service. Compatibility is a protocol check, not a user CLI hash.
+        suspend(registration)
+        registration = native('register')
+        if registration != 'enabled':
+            return {'registration': registration, 'state': registration, 'running': False, 'ready': False}
+        state = wait_service(bundle_build())
+    if state['state'] == 'migration_required':
+        rpc('migrate')
+        state = wait_service(bundle_build())
+    if state['state'] == 'authorization_required' and action == 'install':
+        with administrator_form() as proof:
+            rpc('enroll', authorization=proof)
+        state = wait_service(bundle_build())
+    return {**state, 'registration': registration}

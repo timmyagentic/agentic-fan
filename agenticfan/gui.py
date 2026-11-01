@@ -10,7 +10,6 @@ from .errors import AgenticFanError, invalid
 from .launch import cli_command
 
 
-from .helper_install import AUTHORIZATION_SCRIPT
 
 
 def sensor_cells(row):
@@ -44,8 +43,8 @@ def run_control(arguments: list[str], demo: bool, timeout: float) -> dict:
         from .helper import status
         from .helper_install import manage
         helper = status()
-        if not helper.get("running") or not helper.get("compatible"):
-            manage("install")
+        if not helper.get("ready") and not manage("install").get("ready"):
+            raise AgenticFanError("SERVICE_NOT_READY", "请在 AgenticFan 设置中完成控扇授权。", 4)
     result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
     messages = [json.loads(line) for line in result.stdout.replace("\r\n", "\n").replace("\r", "\n").splitlines() if line.strip()]
     if result.returncode:

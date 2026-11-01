@@ -1,14 +1,8 @@
-"""Restricted local control service. No shell, file paths or SMC keys in its protocol.
-
-The administrator grants one local UID access at installation. The socket's
-permissions AND kernel peer credentials enforce that grant. This authorizes
-processes belonging to that user, including agents; it is not app attestation.
-The daemon and every child run from a root-owned copy of the frozen app.
-"""
+"""Versioned, UID-restricted IPC between user clients and the bundled system service."""
 from __future__ import annotations
 
 import ctypes
-import hashlib
+import re
 import json
 import os
 from pathlib import Path
@@ -20,28 +14,34 @@ import subprocess
 import sys
 import threading
 import time
-from functools import lru_cache
 
 from . import __version__
 from .errors import AgenticFanError, invalid
 from .guardian import validate_duration, validate_update
 from .protocol import emit, failure, success
 
-LABEL = 'io.github.timmyagentic.agenticfan.helper'
+LABEL = 'io.github.timmyagentic.agenticfan.control'
+LEGACY_LABEL = 'io.github.timmyagentic.agenticfan.helper'
 BASE = Path('/Library/Application Support/AgenticFan')
-APP = BASE / 'Helper.app'
-EXECUTABLE = APP / 'Contents/MacOS/agenticfan'
+LEGACY_EXECUTABLE = BASE / 'Helper.app/Contents/MacOS/agenticfan'
 CONFIG = BASE / 'helper.json'
-PLIST = Path('/Library/LaunchDaemons') / (LABEL + '.plist')
-SOCKET_DIRECTORY = Path('/var/run/agenticfan-helper')
+LEGACY_PLIST = Path('/Library/LaunchDaemons') / (LEGACY_LABEL + '.plist')
+SOCKET_DIRECTORY = Path('/var/run/agenticfan-control')
 SOCKET = SOCKET_DIRECTORY / 'control.sock'
+CACHE = Path('/private/var/run/agenticfan-service-runtime')
+PROTOCOL = 2
 MAX_MESSAGE = 4096
-PROTOCOL = 1
+MANAGEMENT = ('enroll', 'migrate', 'drain', 'resume', 'revoke')
 
 
-@lru_cache(maxsize=1)
-def build_id():
-    return hashlib.sha256(Path(sys.executable).read_bytes()).hexdigest() if getattr(sys, 'frozen', False) else 'source'
+def worker_executable():
+    path = Path(sys.executable)
+    if (os.geteuid() != 0 or not getattr(sys, 'frozen', False) or path.parent != CACHE
+            or not re.fullmatch(r'worker-[0-9a-f]{64}', path.name)):
+        raise AgenticFanError('PERMISSION_DENIED', 'Expected the protected bundled control worker.', 4)
+    check_root_path(CACHE, directory=True)
+    check_root_path(path)
+    return path
 
 
 def peer_uid(connection):
@@ -57,12 +57,6 @@ def peer_uid(connection):
     # Linux is used exclusively by isolated simulated transport tests.
     import struct
     return struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[1]
-
-
-def authorize(connection, allowed_uid):
-    uid = peer_uid(connection)
-    if uid not in (0, allowed_uid):
-        raise AgenticFanError('HELPER_ACCESS_DENIED', 'This user has not been authorized to control fans.', 4)
 
 
 def read_request(connection):
@@ -81,10 +75,14 @@ def read_request(connection):
 
 
 def validate_request(request):
-    if not isinstance(request, dict) or request.get('protocol') != PROTOCOL:
+    if not isinstance(request, dict) or type(request.get('protocol')) is not int or request['protocol'] != PROTOCOL:
         raise invalid('Unsupported helper protocol.')
     operation = request.get('operation')
-    fields = {'protocol', 'operation', 'version', 'build'}
+    fields = {'protocol', 'operation'}
+    if operation in ('enroll', 'revoke'):
+        fields.add('authorization')
+        if not isinstance(request.get('authorization'), str) or not re.fullmatch(r'[A-Za-z0-9+/]{43}=', request['authorization']):
+            raise invalid('Invalid authorization form.')
     if operation in ('set', 'auto'):
         fields |= {'fans', 'experimental_ftst'}
         fans = request.get('fans')
@@ -103,13 +101,10 @@ def validate_request(request):
             value = request['lease_seconds']
             if type(value) not in (int, float) or not 1 <= value <= 10:
                 raise invalid('A heartbeat lease must be finite and between 1 and 10 seconds.')
-    elif operation not in ('auto', 'status'):
-        raise invalid('Helper only accepts status, set and auto.')
+    elif operation not in ('auto', 'status', *MANAGEMENT):
+        raise invalid('Unknown control service operation.')
     if set(request) != fields:
         raise invalid('Unexpected or missing helper request fields.')
-    if (request['version'] != __version__ or request['build'] != build_id()) and operation != 'status':
-        raise AgenticFanError('HELPER_VERSION_MISMATCH', 'Run agenticfan helper install to update the helper.', 4,
-                          helper_version=__version__, client_version=request['version'])
     return request
 
 
@@ -118,22 +113,19 @@ def send(connection, message):
 
 
 def worker_command(request):
-    # Only this immutable installed executable may be launched by the service.
+    executable = str(worker_executable())
     if request['operation'] == 'set':
-        return [str(EXECUTABLE), '--internal-guardian']
-    arguments = [str(EXECUTABLE), 'fans', 'auto']
-    for fan in request['fans']:
-        arguments.extend(['--fan', str(fan)])
-    if request['experimental_ftst']:
-        arguments.append('--experimental-ftst')
-    return arguments
+        return [executable, '--internal-guardian']
+    if request['operation'] == 'auto':
+        return [executable, '--internal-auto', json.dumps(request, separators=(',', ':'))]
+    raise invalid('Not a hardware operation.')
 
 
 def relay(connection, request, stopping, command=None, env=None):
     """A disconnected caller closes guardian stdin; the guardian owns rollback."""
     environment = env if env is not None else {
         'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'HOME': '/var/root',
-        'LANG': 'en_US.UTF-8', 'PYINSTALLER_RESET_ENVIRONMENT': '1',
+        'LANG': 'en_US.UTF-8', 'TMPDIR': str(CACHE), 'PYINSTALLER_RESET_ENVIRONMENT': '1',
     }
     process = subprocess.Popen(command or worker_command(request), stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -208,17 +200,23 @@ def relay(connection, request, stopping, command=None, env=None):
             process.wait()
 
 
-def handle(connection, allowed_uid, stopping):
+def handle(connection, access, stopping):
     try:
         connection.settimeout(3)
-        authorize(connection, allowed_uid)
+        uid = peer_uid(connection)
+        access.authorize(uid)
         request = validate_request(read_request(connection))
-        if request['operation'] == 'status':
+        op = request['operation']
+        if op in MANAGEMENT:
+            access.manage(uid, request)
+        if op == 'status' or op in MANAGEMENT:
             send(connection, success({'installed': True, 'running': True, 'version': __version__,
-                                     'build': build_id(), 'authorized_uid': allowed_uid, 'protocol': PROTOCOL}))
+                                     'service_build': Path(sys.executable).name.removeprefix('worker-'),
+                                     'state': access.state(uid), 'protocol': PROTOCOL}))
             send(connection, {'helper_exit_code': 0})
         else:
-            relay(connection, request, stopping)
+            with access.control(uid):
+                relay(connection, request, stopping)
     except (BrokenPipeError, ConnectionResetError):
         pass
     except Exception as exc:
@@ -236,23 +234,29 @@ def check_root_path(path, directory=False):
     info = path.lstat()
     if info.st_uid != 0 or info.st_mode & 0o022 or stat.S_ISLNK(info.st_mode):
         raise AgenticFanError('UNSAFE_HELPER_PATH', 'Helper files must be root-owned and not writable by other users.', path=str(path))
+    if not directory and not stat.S_ISREG(info.st_mode):
+        raise AgenticFanError('UNSAFE_HELPER_PATH', 'Expected a regular file.', path=str(path))
     if directory and not stat.S_ISDIR(info.st_mode):
         raise AgenticFanError('UNSAFE_HELPER_PATH', 'Expected helper directory.', path=str(path))
 
 
 def serve():
-    if os.geteuid() != 0 or not getattr(sys, 'frozen', False) or Path(sys.executable).resolve() != EXECUTABLE:
-        raise AgenticFanError('PERMISSION_DENIED', 'The helper must run from its installed root-owned bundle.', 4)
-    for path in (BASE, APP, APP / 'Contents', APP / 'Contents/MacOS'):
-        check_root_path(path, directory=True)
-    check_root_path(EXECUTABLE)
-    check_root_path(CONFIG)
-    config = json.loads(CONFIG.read_text())
-    allowed_uid = config['authorized_uid']
-    if type(allowed_uid) is not int or allowed_uid < 501:
-        raise invalid('Invalid helper owner.')
+    from .runtime import lock
+    worker_executable()
+    with lock(CACHE, 'daemon.lock'):
+        return serve_socket()
+
+
+def serve_socket():
+    from .service_access import ServiceAccess
+    for parent in (BASE.parent.parent, BASE.parent):
+        check_root_path(parent, directory=True)
+    BASE.mkdir(mode=0o755, exist_ok=True)
+    check_root_path(BASE, directory=True)
+    access = ServiceAccess()
     SOCKET_DIRECTORY.mkdir(mode=0o755, exist_ok=True)
     check_root_path(SOCKET_DIRECTORY, directory=True)
+    os.chmod(SOCKET_DIRECTORY, 0o755)  # bootstrap uses umask 077; clients must traverse this directory
     SOCKET.unlink(missing_ok=True)  # protected parent; stale socket after restart
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     stopping = threading.Event()
@@ -262,12 +266,11 @@ def serve():
     signal.signal(signal.SIGINT, stop)
     os.umask(0o077)
     server.bind(str(SOCKET))
-    os.chown(SOCKET, allowed_uid, -1)
-    os.chmod(SOCKET, 0o600)
+    access.permissions()
     server.listen(8)
     server.settimeout(.5)
     def work(connection):
-        try: handle(connection, allowed_uid, stopping)
+        try: handle(connection, access, stopping)
         finally: slots.release()
     try:
         while not stopping.is_set():
@@ -286,7 +289,7 @@ def serve():
 
 
 def request(operation, *, output=emit, cancel_event=None, heartbeat=None, target_update=None, **parameters):
-    payload = {'protocol': PROTOCOL, 'version': __version__, 'build': build_id(), 'operation': operation, **parameters}
+    payload = {'protocol': PROTOCOL, 'operation': operation, **parameters}
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     interrupted = False
     last = None
@@ -302,7 +305,7 @@ def request(operation, *, output=emit, cancel_event=None, heartbeat=None, target
         if peer_uid(connection) != 0:
             raise AgenticFanError('HELPER_ACCESS_DENIED', 'The local service is not running as root.', 4)
         send(connection, payload)
-        connection.settimeout(None)
+        connection.settimeout(3 if operation == "status" else 25 if operation in MANAGEMENT else None)
         if can_signal: signal.signal(signal.SIGTERM, stop)
         raw = b''
         next_heartbeat = 0
@@ -350,7 +353,7 @@ def request(operation, *, output=emit, cancel_event=None, heartbeat=None, target
                 last = message
                 output(message)
     except (FileNotFoundError, ConnectionRefusedError):
-        raise AgenticFanError('HELPER_NOT_INSTALLED', 'Run agenticfan helper install once to authorize fan control.', 4) from None
+        raise AgenticFanError('HELPER_NOT_INSTALLED', 'Open AgenticFan to authorize its bundled control service.', 4) from None
     except PermissionError:
         raise AgenticFanError('HELPER_ACCESS_DENIED', 'This user cannot access the installed helper.', 4) from None
     finally:
@@ -362,10 +365,12 @@ def status():
     messages = []
     try:
         code = request('status', output=messages.append)
-        if code or not messages[-1].get('ok'):
-            return {'installed': True, 'running': False, 'error': messages[-1].get('error')}
+        if code or not messages or not messages[-1].get('ok'):
+            return {'installed': True, 'running': False, 'ready': False,
+                    'error': messages[-1].get('error') if messages else None}
         data = messages[-1]['data']
-        return {**data, 'compatible': data['version'] == __version__ and data['build'] == build_id()}
+        compatible = data.get('protocol') == PROTOCOL
+        return {**data, 'compatible': compatible, 'ready': compatible and data['state'] == 'ready'}
     except (AgenticFanError, OSError) as exc:
-        return {'installed': PLIST.exists(), 'running': False,
+        return {'installed': False, 'running': False, 'ready': False, 'legacy_present': LEGACY_PLIST.exists(),
                 'error': exc.as_dict() if isinstance(exc, AgenticFanError) else {'message': str(exc)}}
