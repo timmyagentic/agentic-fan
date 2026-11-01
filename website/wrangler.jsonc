@@ -3,7 +3,10 @@
   "compatibility_date": "2026-10-20",
   "workers_dev": false,
   "preview_urls": false,
+  "main": "worker.mjs",
   "assets": {
+    "binding": "ASSETS",
+    "run_worker_first": ["/download"],
     "directory": "./public",
     "html_handling": "auto-trailing-slash",
     "not_found_handling": "404-page"
