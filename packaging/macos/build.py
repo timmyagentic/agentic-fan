@@ -89,6 +89,9 @@ def smoke(executable: Path, directory: Path, gui=True):
                AGENTICFAN_RULES_PATH=str(directory / "demo/rules.json"), PATH="/usr/bin:/bin:/usr/sbin:/sbin")
     for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
         env.pop(key, None)
+    run(executable.parent / "AgenticFanService", "--verify-worker", cwd=directory, env=env, timeout=15)
+    service = json.loads(run(executable.parent / "AgenticFanControlWorker", "--service-info", cwd=directory, env=env, capture_output=True, text=True, timeout=20).stdout)
+    assert service["protocol"] == 2
     for arguments in (
         ["schema"], ["--demo", "snapshot"],
         ["--demo", "fans", "set", "--fan", "all", "--rpm", "3000", "--duration", "1"],
@@ -131,6 +134,35 @@ def smoke(executable: Path, directory: Path, gui=True):
                       cwd=directory, env=env, capture_output=True, text=True, timeout=30)
         if "AGENTICFAN_STARTUP_SMOKE_OK" not in startup.stdout:
             raise RuntimeError(f"Native menu-bar startup failed: {startup.stdout}\n{startup.stderr}")
+
+
+SERVICE_PLIST = 'io.github.timmyagentic.agenticfan.control.plist'
+
+
+def bundle_service(app, work, identity, env):
+    """Keep the user CLI fast; bundle a dedicated one-file worker for root."""
+    macos = app / 'Contents/MacOS'
+    run(sys.executable, '-m', 'PyInstaller', '--onefile', '--clean', '--noconfirm',
+        '--name', 'AgenticFanControlWorker', '--target-arch', 'arm64',
+        '--specpath', work / 'service-spec', '--workpath', work / 'service-build',
+        '--distpath', work / 'service-product', '--paths', ROOT,
+        *(['--codesign-identity', identity] if identity else []),
+        ROOT / 'packaging/macos/service_launcher.py', cwd=ROOT, env=env)
+    worker = macos / 'AgenticFanControlWorker'
+    shutil.copy2(work / 'service-product' / worker.name, worker)
+    signing = ['--options', 'runtime', '--timestamp'] if identity else []
+    run('codesign', '--force', '--sign', identity or '-', *signing, worker)
+    digest = hashlib.sha256(worker.read_bytes()).hexdigest()
+    bootstrap = macos / 'AgenticFanService'
+    run('xcrun', 'clang', '-O2', '-Wall', '-Werror', '-Wno-deprecated-declarations',
+        '-target', 'arm64-apple-macos15.0', f'-DWORKER_SHA256="{digest}"',
+        ROOT / 'native/ServiceBootstrap.c', '-o', bootstrap)
+    run('codesign', '--force', '--sign', identity or '-', *signing, bootstrap)
+    definitions = app / 'Contents/Library/LaunchDaemons'
+    definitions.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / 'packaging/macos' / SERVICE_PLIST, definitions / SERVICE_PLIST)
+    run(bootstrap, '--verify-worker')
+    return digest
 
 
 def notarize(path: Path, profile: str):
@@ -186,6 +218,8 @@ def main(argv=None):
         info_path = app / "Contents/Info.plist"
         info = plistlib.loads(info_path.read_bytes())
         info['CFBundleExecutable'] = 'AgenticFanUI'
+        info['AgenticFanDevelopmentService'] = not bool(args.notary_profile)
+        info['AgenticFanServiceBuild'] = bundle_service(app, work, args.identity, env)
         info_path.write_bytes(plistlib.dumps(info))
         signing = ["--options", "runtime", "--timestamp"] if args.identity else []
         run("codesign", "--force", "--sign", args.identity or "-", *signing, executable)
@@ -240,7 +274,7 @@ def main(argv=None):
         "artifact": dmg.name, "version": version, "architecture": "arm64", "minimum_macos": "15.0",
         "python": platform.python_version(), "pyinstaller": PyInstaller.__version__,
         "signing": "developer_id" if args.identity else "ad_hoc", "notarized": bool(args.notary_profile),
-        "verified": ["project_license", "codesign", "hdiutil", "mounted_app", "bundled_cli", "hook_file_workflow", "temperature_curve_workflow", "demo_guardian", "demo_gui", "demo_temperature_quality", "demo_menu_bar_startup"],
+        "verified": ["bundled_service_digest", "isolated_service_entry", "project_license", "codesign", "hdiutil", "mounted_app", "bundled_cli", "hook_file_workflow", "temperature_curve_workflow", "demo_guardian", "demo_gui", "demo_temperature_quality", "demo_menu_bar_startup"],
         "hardware_verified": False, "sha256": digest,
     }
     dmg.with_suffix(".build.json").write_text(json.dumps(metadata, indent=2) + "\n")

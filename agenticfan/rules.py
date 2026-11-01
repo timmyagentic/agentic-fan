@@ -316,6 +316,7 @@ class Control:
         self.feedback = Feedback(fan)
         self.reason = self.error = self.exit_code = None
         self.fresh_until = time.monotonic() + 3
+        self.local_stop_reason = None
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
@@ -328,14 +329,16 @@ class Control:
                 from .guardian import run_session
                 hw = demo_hardware()
                 def wait_stop(delay):
-                    return self.cancelled.wait(delay) or time.monotonic() >= self.fresh_until
+                    if self.cancelled.wait(delay):
+                        return "cancelled"
+                    return False if self.heartbeat_alive() else "sample_timeout"
                 run_session(hw, runtime_directory(True), [self.fan], self.initial_rpm, 3600, False,
                             self.messages.put, wait_stop, target_update=self.take_target)
             else:
                 from .helper import request
                 code = request("set", fans=[self.fan], rpm=self.initial_rpm, duration=3600,
                                experimental_ftst=False, lease_seconds=5, output=self.messages.put,
-                               cancel_event=self.cancelled, heartbeat=lambda: time.monotonic() < self.fresh_until,
+                               cancel_event=self.cancelled, heartbeat=self.heartbeat_alive,
                                target_update=self.take_target)
         except Exception as exc:
             error = exc if isinstance(exc, AgenticFanError) else AgenticFanError("RULE_CONTROL_ERROR", str(exc))
@@ -373,7 +376,9 @@ class Control:
         self.confirmed = state['status'] == 'tracking' and not state['pending_update']
         return state
 
-    def cancel(self):
+    def cancel(self, reason=None):
+        if self.local_stop_reason is None:
+            self.local_stop_reason = reason
         self.cancelled.set()
 
     def update(self, rpm):
@@ -388,6 +393,13 @@ class Control:
             target, self.pending_target = self.pending_target, None
             return target
 
+    def heartbeat_alive(self):
+        if time.monotonic() >= self.fresh_until:
+            if self.local_stop_reason is None:
+                self.local_stop_reason = "sample_timeout"
+            return False
+        return self.local_stop_reason is None
+
     def refresh(self):
         self.fresh_until = time.monotonic() + 3
 
@@ -401,6 +413,10 @@ class Runner:
         self.last_fan = None
         self.control_mode = None
         self.curve_slew = None
+        self.recovering = False
+        self.pause_code = None
+        self.last_interruption = None
+        self.first_fresh = None
         self.hooks = HookDispatcher()
 
     def tick(self, sample, now, fresh=True):
@@ -434,24 +450,62 @@ class Runner:
             self.hooks.cancel()
         self.last_fan = next((fan for fan in sample.get("fans", [])
                               if fan["id"] == (config or {}).get("fan", getattr(self.control, "fan", -1))), None)
+        just_restored = False
         if self.control and self.control.poll():
             ended = self.control
             # Readback can independently establish auto even after an error
             # envelope (which is never promoted into successful actuation).
             old_fan = next((fan for fan in sample.get("fans", []) if fan["id"] == ended.fan), None)
             verified = ended.restored or bool(old_fan and old_fan.get("mode") == "auto")
+            just_restored = verified
             self.automatic_verified = verified or (not ended.started and ended.exit_code in (0, 2, 3, 4, 6))
-            expected_cancel = (ended.cancelled.is_set() and verified and
-                               (ended.error or {}).get("code") == "CONTROL_CANCELLED")
-            if (ended.error and not expected_cancel) or ended.exit_code not in (0, 130):
+            local_reason = getattr(ended, "local_stop_reason", None)
+            reason = ended.reason
+            if local_reason and reason in (None, "cancelled", "client_disconnected"):
+                reason = local_reason
+            error_code = (ended.error or {}).get("code")
+            cancelled = ended.cancelled.is_set()
+            transient = reason in ("sample_timeout", "readings_unavailable", "lease_expired", "observation_gap")
+            if reason is None and (ended.exit_code == 130 or error_code == "CONTROL_CANCELLED"):
+                reason = "requested" if cancelled else "unknown_cancel"
+            self.pause_code = error_code
+            if reason and reason != "expired":
+                self.last_interruption = reason
+            if ended.exit_code not in (0, 130) or (ended.error and not
+                    (error_code == "CONTROL_CANCELLED" and verified and (cancelled or transient))):
                 self.pause = (ended.error or {}).get("message", "Rule control did not complete successfully.")
-            elif ended.reason == "external_auto":
+            elif reason == "external_auto":
                 self.pause = "An external automatic-mode request paused these rules. Reapply or enable them explicitly to resume."
+            elif transient and verified and config and config["enabled"]:
+                self.last_interruption = reason
+                self.recovering = True
+                self.first_fresh = None
+            elif (reason in ("signal", "client_disconnected", "cancelled") or (ended.exit_code == 130 and not transient)) and not cancelled:
+                self.pause = "Control stopped unexpectedly. Reapply the rules to resume."
             if not self.automatic_verified:
+                self.pause_code = "RESTORE_UNCONFIRMED"
                 self.pause = "Automatic restoration was not verified. Restore automatic mode and inspect fan state."
             self.control = None
             self.control_mode = None
         desired = decision["desired_rpm"] if not error and not self.pause else None
+        if self.recovering:
+            # Never resume on stale data or take over another manual owner. Two
+            # distinct, consecutive observations avoid flapping after wake/gaps.
+            if just_restored or error or self.pause or not fresh or not config or not config["enabled"] or not decision.get("readings_available"):
+                self.first_fresh = None
+            elif not self.last_fan or self.last_fan.get("mode") != "auto":
+                self.pause = "Fan ownership changed during recovery. Reapply after verifying automatic mode."
+                self.recovering = False
+            elif self.first_fresh is not None and 0 < now - self.first_fresh <= 3:
+                self.recovering = False
+            else:
+                self.first_fresh = now
+            if self.recovering or self.pause:
+                desired = None
+        # The snapshot may have seen our own manual fan *before* poll drained
+        # its final restoration receipt. Only a later read can prove an outsider.
+        if just_restored and self.last_fan and self.last_fan.get("mode") != "auto":
+            desired = None
         mode = (config or {}).get("mode", "rules")
         if mode == "curve" and desired is not None:
             if (self.curve_slew is None or self.control is None or self.control_mode != "curve"
@@ -469,7 +523,9 @@ class Runner:
             self.curve_slew = None
         if self.control and (desired is None or (config and config["fan"] != self.control.fan)
                              or mode != self.control_mode):
-            self.control.cancel()
+            why = ("sample_timeout" if not fresh else "readings_unavailable" if config and config["enabled"]
+                   and not decision.get("readings_available", True) else None)
+            self.control.cancel(why)
         elif self.control and desired != self.control.rpm and not self.control.cancelled.is_set():
             if mode == "curve":
                 self.control.update(desired)
@@ -487,6 +543,8 @@ class Runner:
                 self.automatic_verified = False
         if self.control and self.control.cancelled.is_set():
             state = "restoring"
+        elif self.recovering and config and not self.pause:
+            state = "recovering"
         elif error:
             state = "error"
         elif self.pause:
@@ -520,7 +578,9 @@ class Runner:
                 "config_path": str(self.path), "config": config,
                 "loaded_revision": self.document.revision if self.document else None,
                 "loaded_generation": self.document.generation if self.document else None,
-                **decision, "error": error or self.pause,
+                **decision, "desired_rpm": decision["desired_rpm"] if desired is not None else None,
+                "last_interruption": self.last_interruption, "pause_code": self.pause_code if self.pause else None,
+                "error": error or self.pause,
                 "hook": self.hooks.status(),
                 "control_confirmed": confirmed,
                 "control_feedback": feedback,

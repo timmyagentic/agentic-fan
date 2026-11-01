@@ -15,8 +15,14 @@ MANIFEST = {
     "global_options": {"--demo": {"type": "boolean", "default": False, "description": "Explicit synthetic backend; never hardware."}},
     "commands": [
         {"command": "helper install", "effect": "system_configuration_write", "stream": False,
-         "description": "Authorize once to install/update a restricted root-owned local service for this user. Idempotent when current."},
+         "description": "Enable the service bundled with this app; report macOS approval and per-user authorization separately from ready."},
         {"command": "helper status", "effect": "read", "stream": False, "hardware_required": False},
+        {"command": "helper reconcile", "effect": "system_configuration_write", "stream": False,
+         "description": "Reconcile a previous service opt-in. A fresh monitoring-only installation does not register."},
+        {"command": "helper prepare-update", "effect": "system_configuration_write", "stream": False,
+         "description": "Installer: drain an idle service and unregister an enabled job; retain opt-in receipt."},
+        {"command": "helper resume-update", "effect": "system_configuration_write", "stream": False,
+         "description": "Installer: re-register a previously enabled service from the replacement bundle."},
         {"command": "helper uninstall", "effect": "system_configuration_write", "stream": False,
          "description": "Administrator-authorized removal; refuses while a control session is active."},
         {"command": "schema", "effect": "read", "stream": False, "hardware_required": False},
@@ -95,7 +101,7 @@ MANIFEST = {
         "rules_receipts": "saved means persisted, loaded means a live runner observed this exact file generation, active/cooling means a rule requests control, and control_confirmed means observed RPM reached tolerance. rules status is stale after four seconds without a heartbeat. rules_finished automatic_mode_verified only covers outstanding writes owned by this runner, not other controllers.",
         "sensor_labels": "Additive display_name/group/group_name/label_status/label_source/label_note fields. Original id and name stay unchanged. community_mapping is chip-scoped; system_name translates IOHID Product. label_verified remains false; neither source proves physical calibration or a physical core number.",
         "temperature_overview": "Per identified group, the maximum of currently valid mapped points, with contributing IDs and value_sensor_id. Unknown and calibration rows are excluded. This is not a package sensor or an average. Missing valid data returns null.",
-        "authorization": "Run helper install once as the normal user. Subsequent set/auto commands use the local helper without sudo or prompts. Updating/removing the helper may require authorization again. Access is granted to processes of that user, not authenticated by app identity.",
+        "authorization": "A bundled SMAppService daemon performs restricted fan writes. Normal installs and startup reconcile an existing opt-in; helper install explicitly enables. Only ready=true means macOS approval, per-user grant and migration are complete. Wire protocol 2 is independent of the UI binary hash. The kernel peer UID limits writes to the authorized account. No privileged Hook execution.",
         "readback": "Mode, target and restoration readback are polled for up to 3 seconds per step. Setup counts toward the session duration. No automatic Ftst opt-in or repeated SMC writes.",
         "temperatures": "Celsius; value is populated only for status=ok. Finite interface readings are preserved in raw_value; non-finite values use raw_non_finite. No imputation. Labels/physical locations are unverified; IOHID IDs last for this boot.",
         "sensor_status": {"ok": "Nonzero finite reading within the declared plausibility bounds, not proof of calibration, physical mapping or thermal safety.",
@@ -163,6 +169,7 @@ MANIFEST['semantics']['temperature_curves'] = (
     'desired_rpm is the smoothed request. One bounded leased guardian session accepts sequenced RPM-only updates '
     'without toggling automatic mode between targets. Updates do not extend its 3600-second deadline or heartbeat lease. '
     'Confirmation is tied to the exact update sequence; moving targets cannot reset the 15-second tracking failure timer. '
+    'Known sample_timeout, lease_expired or observation_gap interruptions enter recovering only after verified auto and require two consecutive fresh readings. Unknown stops and unverified restore remain paused. last_interruption and pause_code expose the reason. '
     'Missing/stale temperature, invalid config, stop or expiry releases owned control. External auto pauses until explicit reapply. '
     'Curve mode retains threshold rules and Hook settings but does not evaluate rules or submit threshold Hook events. '
     'No configured mode defaults to legacy rules; enabled=false disables either mode. No curve is enabled implicitly.'

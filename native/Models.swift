@@ -197,6 +197,7 @@ struct RulesRuntime: Decodable {
     let activeRuleIds: [String]
     let error: String?
     let automaticModeVerified: Bool?
+    let pauseCode: String?
     let controlConfirmed: Bool
     let controlActive: Bool?
     let controlFeedback: ControlFeedback?
@@ -204,7 +205,7 @@ struct RulesRuntime: Decodable {
     var statusText: String {
         if status == "disabled" { return "系统自动" }
         if config?.mode == "curve", status == "active" { return "曲线平滑调速中" }
-        return ["watching": "规则监测中", "pending": "高温持续确认中", "active": "温度规则已触发", "cooling": "降温确认中", "restoring": "正在恢复系统自动", "paused": "规则已暂停", "error": "规则运行异常"][status] ?? status
+        return ["recovering": "已恢复系统自动，等待连续有效采样", "watching": "规则监测中", "pending": "高温持续确认中", "active": "温度规则已触发", "cooling": "降温确认中", "restoring": "正在恢复系统自动", "paused": "规则已暂停", "error": "规则运行异常"][status] ?? status
     }
     var mayOwnControl: Bool { controlActive == true || desiredRpm != nil || ["active", "cooling", "restoring"].contains(status) }
     var hookSummary: String {

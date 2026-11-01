@@ -9,7 +9,7 @@
 ## 安装流程
 
 1. 确认执行机器是 **Apple Silicon、macOS 15+**。Linux 可以开发测试，不能把 Linux 上的模拟输出当作 Mac 安装成功。
-2. 检查当前是否已有 `agenticfan`。安装目标为 `~/Applications/AgenticFan.app`、`~/.local/bin/agenticfan`；Codex skill 位于 `~/.agents/skills/agenticfan`，Claude Code skill 位于 `~/.claude/skills/agenticfan`。
+2. 检查当前是否已有 `agenticfan`。默认安装目标为 `~/Applications/AgenticFan.app`（已有全局安装时更新 `/Applications/AgenticFan.app`）、`~/.local/bin/agenticfan`；Codex skill 位于 `~/.agents/skills/agenticfan`，Claude Code skill 位于 `~/.claude/skills/agenticfan`。
 3. 正式安装无需 GitHub 登录。匿名下载 [最新正式 Release](https://github.com/timmyagentic/agentic-fan/releases/latest) 中的安装脚本，阅读脚本后执行；不要覆盖用户已有的源码目录：
 
 ```sh
@@ -61,8 +61,8 @@ bash /absolute/path/install-macos.sh --dmg /absolute/path/AgenticFan-0.4.2-arm64
 
 升级也按相同安装流程执行，以同步更新 App、CLI 与所选 Agent 的 skill；若 skill 被用户修改，保留冲突并报告。0.2.0 将 JSON 协议升为 v2：零值和异常值的 `value` 均为 `null`，原始数值存于 `raw_value`，不得用作可用温度。升级后重新读取 `schema`，确认 `--version`，并执行只读 `doctor`、短期 `watch` 复查；规则详见 [温度有效性说明](docs/temperature-validation.md)。
 
-安装过程不做真实风扇写入，不配置免密 sudo，也不把模拟结果当作硬件验收。用户要求启用控扇时，以普通用户运行 `agenticfan helper install`，通过系统授权安装 root 持有的 Helper。之后的 `fans set` / `fans auto` 无需 sudo 或重复认证。GUI 首次控扇会执行同一步骤。`helper status` 检查版本与服务；`helper uninstall` 经管理员授权卸载。活动会话期间禁止安装/卸载。
+0.4.6 将受限控扇服务内置于 App。升级前结束活动会话并退出旧 App；安装器和 App 会协调已启用服务的迁移和注册，普通监测不需要管理员授权。首次调速或系统要求批准时，在 App 内“授权控扇”并按系统提示操作；`helper status` 的 `ready:true` 才表示就绪。现有规则、曲线和 Hook 保留，旧授权不会扩大到其他账户。命令行可用 `helper install` 显式启用、`helper uninstall` 注销。详见[服务迁移与权限](docs/helper.md)。
 
-正式 Release 使用 Developer ID 签名和 Apple 公证；默认下载安装遇到 Gatekeeper 验证失败会停止，不安装该包。脚本保留系统安全设置和 quarantine。显式选择开发包时可能仍需用户通过 macOS 系统界面确认打开。安装与监控不应要求管理员密码；首次安装或更新 Helper 需要管理员授权，日常控扇由后台服务执行。
+正式 Release 使用 Developer ID 签名和 Apple 公证；默认下载安装遇到 Gatekeeper 验证失败会停止，不安装该包。脚本保留系统安全设置和 quarantine。显式选择开发包时可能仍需用户通过 macOS 系统界面确认打开。安装与监控不应要求管理员密码；首次启用或系统要求时需要授权，后续更新随 App 处理，日常控扇由后台服务执行。
 
 用户取消系统授权、仓库不可访问或硬件接口不可用时，保留具体错误并报告已完成的部分，不把任务笼统标为成功。

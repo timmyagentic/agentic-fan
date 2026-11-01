@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Bundle the permission-isolated fan service and manage registration, idle upgrades and migration from 0.4.5 with the app. Preserve the existing user grant, rules, curves and Hooks. Recover known sampling/lease interruptions after verified automatic mode and two fresh observations; leave external stops and hardware failures paused.
+
 ## 0.4.5 — 2026-11-01
 
 - Fix curve tracking feedback in 0.4.5: report fresh hardware observations of the applied target independently of pending requests, expire stale feedback, and revoke confirmation when RPM drifts after an earlier success. Keep exact sequence confirmation and continuous mismatch deadlines. Show applied/actual RPM and tracking state in the native UI; stop retaining healthy feedback after control ends.

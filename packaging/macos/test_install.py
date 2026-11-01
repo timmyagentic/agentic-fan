@@ -26,6 +26,7 @@ def main():
     source.add_argument("--dmg", type=Path)
     source.add_argument("--run-id")
     source.add_argument("--release", action="store_true", help="Download the public stable Release without gh")
+    parser.add_argument("--previous-dmg", type=Path, help="Exercise replacement of an existing App/CLI/skill in the temporary user root")
     args = parser.parse_args()
     install_source = ["--dmg", args.dmg.resolve()] if args.dmg else ["--run-id", args.run_id] if args.run_id else []
     with tempfile.TemporaryDirectory(prefix="agenticfan-install-test-") as temporary:
@@ -34,6 +35,19 @@ def main():
         user.mkdir()
         (user / ".zprofile").write_text("# Preserve user settings\n")
         command = ["/bin/bash", ROOT / "scripts/install-macos.sh", *install_source, "--agent", "both", "--user-root", user]
+        # Existing user data (including a custom Hook) must survive both installs.
+        settings = user / 'Library/Application Support/AgenticFan'
+        hooks = settings / 'hooks'; hooks.mkdir(parents=True)
+        original = {settings / 'rules.json': b'{"version":1,"enabled":false,"fan":0,"rules":[{"id":"retained","enabled":true,"sensor_group":"cpu","trigger_celsius":99,"release_celsius":95,"release_seconds":5,"target_rpm":"max"}]}',
+                    hooks / 'custom.sh': b'#!/bin/sh\n# preserved\n'}
+        for path, content in original.items(): path.write_bytes(content)
+        from test_service_vm import hosted_mac, exercise, previous_release
+        previous_dmg = args.previous_dmg or (previous_release(work) if args.dmg and hosted_mac() else None)
+        if previous_dmg:
+            run("/bin/bash", ROOT / "scripts/install-macos.sh", "--dmg", previous_dmg.resolve(),
+                "--agent", "both", "--user-root", user, timeout=180)
+            previous_version = run(user / ".local/bin/agenticfan", "--version").stdout.strip()
+            assert previous_version == "0.4.5"
         first = run(*command, timeout=180)
         messages = [json.loads(line) for line in first.stdout.splitlines()]
         assert len(messages) == 2 and all(message["ok"] for message in messages), first.stdout
@@ -55,9 +69,37 @@ def main():
         assert profile.startswith("# Preserve user settings\n")
         assert (user / ".zprofile.before-agenticfan").read_text() == "# Preserve user settings\n"
         run("/usr/bin/codesign", "--verify", "--deep", "--strict", user / "Applications/AgenticFan.app")
+        backups = list((user / "Applications").glob("AgenticFan.previous.*.app"))
+        assert len(backups) == (1 if previous_dmg else 0)
+        if previous_dmg:
+            assert run(backups[0] / "Contents/MacOS/agenticfan", "--version").stdout.strip() == previous_version
+            assert run(binary, "--version").stdout.strip() == info["CFBundleShortVersionString"]
+            for folder in (".agents", ".claude"):
+                marker = user / folder / "skills/agenticfan/installation.json"
+                assert json.loads(marker.read_text())["version"] == info["CFBundleShortVersionString"]
+            print("PASS: actual 0.4.5 app, CLI and both skills upgraded in place")
         run(*command, timeout=180)
         assert (user / ".zprofile").read_text() == profile
-        assert not list((user / "Applications").glob("AgenticFan.previous.*.app"))
+        assert list((user / "Applications").glob("AgenticFan.previous.*.app")) == backups
+        for path, content in original.items():
+            assert path.read_bytes() == content, 'Existing configuration changed during installation'
+        if 'AgenticFanServiceBuild' in info:
+            daemon = 'io.github.timmyagentic.agenticfan.control.plist'
+            definition = plistlib.loads((executable.parents[1] / 'Library/LaunchDaemons' / daemon).read_bytes())
+            assert definition['UserName'] == 'root' and definition['AbandonProcessGroup']
+            assert definition['BundleProgram'] == 'Contents/MacOS/AgenticFanService' and 'Program' not in definition
+            run(executable.parent / 'AgenticFanService', '--verify-worker')
+            assert hashlib.sha256((executable.parent / 'AgenticFanControlWorker').read_bytes()).hexdigest() == info['AgenticFanServiceBuild']
+            # A modified worker must fail before any privileged execution.
+            pair = work / 'tamper'; pair.mkdir()
+            import shutil
+            shutil.copy2(executable.parent / 'AgenticFanService', pair / 'AgenticFanService')
+            (pair / 'AgenticFanControlWorker').write_bytes(b'untrusted')
+            assert subprocess.run([str(pair/'AgenticFanService'), '--verify-worker']).returncode != 0
+            (pair / 'AgenticFanControlWorker').unlink()
+            (pair / 'AgenticFanControlWorker').symlink_to(executable.parent / 'AgenticFanControlWorker')
+            assert subprocess.run([str(pair/'AgenticFanService'), '--verify-worker']).returncode != 0
+            if hosted_mac() and args.dmg: exercise(executable.parents[2], backups[0])
         demo_env = dict(os.environ, AGENTICFAN_DEMO_DIR=str(work / "demo"))
         demo = json.loads(run(binary, "--demo", "doctor", env=demo_env).stdout)
         assert demo["simulated"] and demo["data"]["monitoring_available"]

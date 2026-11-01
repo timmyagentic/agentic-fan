@@ -8,12 +8,12 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from agenticfan import __version__, helper
+from agenticfan import helper
 from agenticfan.errors import AgenticFanError
 
 
 def request(operation='set', **changes):
-    data = {'protocol': 1, 'version': __version__, 'build': helper.build_id(), 'operation': operation}
+    data = {'protocol': 2, 'operation': operation}
     if operation in ('set', 'auto'):
         data.update(fans=[0], experimental_ftst=False)
     if operation == 'set':
@@ -36,26 +36,23 @@ class HelperProtocolTests(unittest.TestCase):
         helper.validate_request(request(lease_seconds=5))
         helper.validate_request(request())
 
-    def test_version_mismatch_rejected_before_hardware(self):
-        with self.assertRaises(AgenticFanError) as error:
-            helper.validate_request(request(version='0.0.0'))
-        self.assertEqual(error.exception.code, 'HELPER_VERSION_MISMATCH')
-        helper.validate_request(request('status', version='0.0.0'))
+    def test_protocol_not_product_binary_is_the_compatibility_boundary(self):
+        helper.validate_request(request())
+        for bad in (request(protocol=1), request(version='0.4.5'), request(build='/bin/sh')):
+            with self.assertRaises(AgenticFanError):
+                helper.validate_request(bad)
 
     def test_uid_boundary_uses_kernel_credentials(self):
         client, server = socket.socketpair()
         self.addCleanup(client.close); self.addCleanup(server.close)
         self.assertEqual(helper.peer_uid(server), os.geteuid())
-        with patch('agenticfan.helper.peer_uid', return_value=9999):
-            with self.assertRaises(AgenticFanError) as error:
-                helper.authorize(server, 501)
-            self.assertEqual(error.exception.code, 'HELPER_ACCESS_DENIED')
 
     def test_handler_denies_other_user_before_spawning(self):
         client, server = socket.socketpair()
         self.addCleanup(client.close)
-        with patch('agenticfan.helper.peer_uid', return_value=9999), patch('agenticfan.helper.relay') as relay:
-            helper.handle(server, 501, threading.Event())
+        from agenticfan.service_access import ServiceAccess
+        with patch('agenticfan.service_access.legacy_loaded', return_value=False), patch('agenticfan.service_access.owner', return_value=501), patch('agenticfan.helper.peer_uid', return_value=9999), patch('agenticfan.helper.relay') as relay:
+            helper.handle(server, ServiceAccess(), threading.Event())
         message = json.loads(client.makefile('r').readline())
         self.assertFalse(message['ok'])
         relay.assert_not_called()
@@ -67,8 +64,11 @@ class HelperProtocolTests(unittest.TestCase):
         with self.assertRaises(AgenticFanError): helper.read_request(server)
 
     def test_worker_uses_only_installed_executable_and_fixed_arguments(self):
-        self.assertEqual(helper.worker_command(request()), [str(helper.EXECUTABLE), '--internal-guardian'])
-        self.assertEqual(helper.worker_command(request('auto')), [str(helper.EXECUTABLE), 'fans', 'auto', '--fan', '0'])
+        with patch.object(helper, 'worker_executable', return_value=Path('/protected/worker')):
+            self.assertEqual(helper.worker_command(request()), ['/protected/worker', '--internal-guardian'])
+            argv = helper.worker_command(request('auto'))
+            self.assertEqual(argv[:2], ['/protected/worker','--internal-auto'])
+            self.assertEqual(json.loads(argv[2]),request('auto'))
 
     def test_missing_helper_never_falls_back_to_sudo(self):
         with tempfile.TemporaryDirectory() as tmp, patch('agenticfan.helper.SOCKET_DIRECTORY', Path(tmp) / 'absent'), \
@@ -198,28 +198,3 @@ run_session(demo_hardware(),runtime_directory(True),config['fans'],config['rpm']
         self.assertEqual(json.loads(stream.readline())['event'], 'control_finished')
         self.assertEqual(json.loads(stream.readline())['helper_exit_code'], 0)
         thread.join(5); self.assertFalse(thread.is_alive())
-
-class HelperInstallTests(unittest.TestCase):
-    def test_bundle_rejects_external_symlink_before_chown(self):
-        from agenticfan.helper_install import secure_bundle
-        with tempfile.TemporaryDirectory() as tmp, patch('agenticfan.helper_install.os.chown') as chown:
-            bundle = Path(tmp) / 'App'; bundle.mkdir()
-            (bundle / 'outside').symlink_to('/etc')
-            with self.assertRaises(AgenticFanError): secure_bundle(bundle)
-            chown.assert_not_called()
-
-    def test_current_helper_install_does_not_prompt(self):
-        from agenticfan.helper_install import manage
-        with patch.object(sys, 'frozen', True, create=True), patch.object(sys, 'platform', 'darwin'), \
-                patch('agenticfan.helper_install.os.geteuid', return_value=501), \
-                patch('agenticfan.helper.status', return_value={'running': True, 'compatible': True}), \
-                patch('agenticfan.helper_install.run') as run:
-            self.assertTrue(manage('install')['running'])
-            run.assert_not_called()
-
-    def test_launchd_executes_protected_runtime_and_preserves_guardian(self):
-        from agenticfan.helper_install import launch_config
-        config = launch_config()
-        self.assertEqual(config['ProgramArguments'], [str(helper.EXECUTABLE), '--internal-helper'])
-        self.assertEqual(config['UserName'], 'root')
-        self.assertTrue(config['AbandonProcessGroup'])

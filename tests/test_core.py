@@ -207,6 +207,24 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(self.hw.mode(1), "auto")
         self.assertEqual(self.smc.read("Ftst"), b"\0")
 
+    def test_lease_expires_while_waiting_for_mode_readback_and_restores(self):
+        def wait(delay):
+            if self.hw.mode(0) == 'manual':
+                return 'lease_expired'
+            return self.clock.wait(delay)
+        self.run_control(wait=wait)
+        self.assertEqual([e['event'] for e in self.events], ['control_finished'])
+        self.assertEqual(self.events[-1]['data']['reason'], 'lease_expired')
+        self.assertTrue(self.events[-1]['data']['automatic_mode_verified'])
+        self.assertEqual(self.hw.mode(0), 'auto')
+
+    def test_restore_failure_takes_precedence_over_a_transient_readback_stop(self):
+        with patch.object(self.hw, 'restore', side_effect=AgenticFanError('RESTORE_FAILED','rejected',7)):
+            with self.assertRaises(AgenticFanError) as caught:
+                self.run_control(wait=lambda delay: 'lease_expired' if self.hw.mode(0)=='manual' else False)
+        self.assertEqual(caught.exception.code,'RESTORE_FAILED')
+        self.assertFalse(any(e.get('data',{}).get('automatic_mode_verified') for e in self.events))
+
     def test_partial_apply_failure_rolls_back(self):
         original = self.smc.write
 
