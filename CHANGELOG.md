@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Let the website fill the browser width and adapt its opening layout to the available height, including wide monitors and phone orientations.
 - Download the current stable Apple Silicon DMG from the website and show fan-equipped Mac compatibility before installation.
 
 ## 0.4.6 — 2026-11-01
