@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -84,10 +85,18 @@ def curve_smoke(executable: Path, directory: Path, env):
                      cwd=directory, capture_output=True, text=True, timeout=20)
         messages = [json.loads(line) for line in result.stdout.splitlines()]
         assert messages and all(m['ok'] and m['simulated'] for m in messages)
-        samples = [m['data']['rules'] for m in messages if m.get('event') == 'sample']
+        frames = [m['data'] for m in messages if m.get('event') == 'sample']
+        samples = [f['rules'] for f in frames]
         targets = [s['desired_rpm'] for s in samples]
         assert targets[0] == 1800 and targets[-1] == 1200 and len(set(targets)) > 2
-        assert all(abs(a - b) < 220 for a, b in zip(targets, targets[1:]))
+        # The nominal sampling interval is one second; the real interval can
+        # differ on a busy machine. Check RPM/second against the timestamps
+        # taken before evaluation, retaining the two-second catch-up cap.
+        times = [datetime.fromisoformat(f['sensors'][0]['sampled_at']) for f in frames]
+        rate = document['curve']['ramp_rpm_per_second']
+        for i in range(1, len(targets)):
+            dt = (times[i] - times[i-1]).total_seconds()
+            assert 0 < dt and abs(targets[i] - targets[i-1]) <= rate * min(2, dt + .05) + 1, (targets, times)
         assert any(s['control_feedback']['status'] == 'tracking' and s['control_feedback']['pending_update']
                    and not s['control_confirmed'] for s in samples if s.get('control_feedback'))
         assert samples[-1]['control_confirmed'] and messages[-1]['data']['automatic_mode_verified']
