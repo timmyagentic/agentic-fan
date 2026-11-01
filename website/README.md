@@ -33,3 +33,5 @@ The product website follows the approved timmyagentic main-site visual language:
 The self-hosted visual assets live under `brand/` in the static directory. Font licenses are included in `brand/fonts/`; Chinese subsets cover the current HTML/JavaScript copy (800 characters). Regenerate those subsets when adding new characters; system fallbacks remain configured. The ambient image is the same approved asset used on the main site. No third-party font request is made by visitors.
 
 See `docs/website-design-qa.md` and `docs/website-brand-preview.jpg` for the validated design.
+
+The `/download` Worker redirects to the macOS package in the latest stable GitHub Release. If release metadata or the matching asset is unavailable, it opens the official latest release page. Run `node --test website/worker.test.mjs` from the repository root to check this behavior.

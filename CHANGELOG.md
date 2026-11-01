@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Download the current stable Apple Silicon DMG from the website and show fan-equipped Mac compatibility before installation.
+
 ## 0.4.6 — 2026-11-01
 
 - Reject a bundled Python runtime that cannot load on the supported macOS 15 minimum.
