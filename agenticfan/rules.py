@@ -435,6 +435,9 @@ class Runner:
                 self.document = doc
                 self.pause = None
             config = self.document.config
+            if not config["enabled"]:
+                self.recovering = False
+                self.first_fresh = None
             if fresh:
                 decision = self.evaluator.evaluate(sample, now)
             else:
@@ -491,7 +494,7 @@ class Runner:
         if self.recovering:
             # Never resume on stale data or take over another manual owner. Two
             # distinct, consecutive observations avoid flapping after wake/gaps.
-            if just_restored or error or self.pause or not fresh or not config or not config["enabled"] or not decision.get("readings_available"):
+            if just_restored or error or self.pause or not fresh or not decision.get("readings_available"):
                 self.first_fresh = None
             elif not self.last_fan or self.last_fan.get("mode") != "auto":
                 self.pause = "Fan ownership changed during recovery. Reapply after verifying automatic mode."

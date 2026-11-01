@@ -33,6 +33,48 @@ def previous_release(work):
     return target
 
 
+def seed_published_app(dmg, work, user):
+    """Verify/replace the genuine artifact even where its embedded Python cannot start."""
+    mount = work / 'published'; mount.mkdir()
+    app = user / 'Applications/AgenticFan.app'; app.parent.mkdir()
+    subprocess.run(['hdiutil', 'attach', '-quiet', '-readonly', '-nobrowse', '-mountpoint', mount, dmg], check=True)
+    try:
+        subprocess.run(['/usr/bin/ditto', mount/'AgenticFan.app', app], check=True)
+    finally:
+        subprocess.run(['hdiutil', 'detach', mount], check=True)
+    subprocess.run(['/usr/bin/codesign', '--verify', '--deep', '--strict', app], check=True)
+    assert plistlib.loads((app/'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']=='0.4.5'
+    cli = app/'Contents/MacOS/agenticfan'
+    link = user/'.local/bin/agenticfan'; link.parent.mkdir(parents=True); link.symlink_to(cli)
+    return hashlib.sha256(cli.read_bytes()).digest()
+
+
+def legacy_app_for_vm(work, published):
+    cli = published/'Contents/MacOS/agenticfan'
+    version = subprocess.run([cli,'--version'], capture_output=True, text=True)
+    if version.returncode == 0 and version.stdout.strip() == '0.4.5':
+        return published
+    # The pinned official DMG links its Python to macOS 27 (_dup3 is absent
+    # on macOS 15). Never substitute a stub daemon. Rebuild the exact released
+    # CLI/daemon with its own spec and the VM's compatible Python instead.
+    if '_dup3' not in version.stderr or 'newer than running OS' not in version.stderr:
+        raise RuntimeError('Unexpected error starting the published legacy CLI: '+version.stderr)
+    commit = '3d73cce04dfec87d134a4fdee497dbd5f0bbbf41'
+    src = work/'legacy-source'
+    subprocess.run(['git', 'init', '-q', src],check=True)
+    subprocess.run(['git','-C',src,'fetch','-q','--depth=1','https://github.com/timmyagentic/agentic-fan.git',commit],check=True)
+    subprocess.run(['git','-C',src,'checkout','-q','--detach','FETCH_HEAD'],check=True)
+    assert subprocess.check_output(['git','-C',src,'rev-parse','HEAD'],text=True).strip()==commit
+    products = work/'legacy-products'
+    subprocess.run([sys.executable, '-m', 'PyInstaller', '--clean', '--noconfirm',
+                    '--distpath', products, '--workpath', work/'legacy-build',
+                    src/'packaging/macos/agenticfan.spec'], cwd=src, check=True)
+    result = products/'AgenticFan.app'
+    assert subprocess.check_output([result/'Contents/MacOS/agenticfan','--version'],text=True).strip()=='0.4.5'
+    print(f'Legacy runtime: exact v0.4.5 source {commit} rebuilt for this VM (published Python needs macOS 27)')
+    return result
+
+
 def exercise(app, previous_app):
     if not hosted_mac():
         raise RuntimeError('Requires a disposable GitHub-hosted macOS VM')

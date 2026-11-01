@@ -41,9 +41,12 @@ def main():
         original = {settings / 'rules.json': b'{"version":1,"enabled":false,"fan":0,"rules":[{"id":"retained","enabled":true,"sensor_group":"cpu","trigger_celsius":99,"release_celsius":95,"release_seconds":5,"target_rpm":"max"}]}',
                     hooks / 'custom.sh': b'#!/bin/sh\n# preserved\n'}
         for path, content in original.items(): path.write_bytes(content)
-        from test_service_vm import hosted_mac, exercise, previous_release
-        previous_dmg = args.previous_dmg or (previous_release(work) if args.dmg and hosted_mac() else None)
-        if previous_dmg:
+        from test_service_vm import hosted_mac, exercise, previous_release, seed_published_app, legacy_app_for_vm
+        hosted_fixture = args.dmg and hosted_mac() and not args.previous_dmg
+        previous_dmg = args.previous_dmg or (previous_release(work) if hosted_fixture else None)
+        if hosted_fixture:
+            old_digest = seed_published_app(previous_dmg, work, user)
+        elif previous_dmg:
             run("/bin/bash", ROOT / "scripts/install-macos.sh", "--dmg", previous_dmg.resolve(),
                 "--agent", "both", "--user-root", user, timeout=180)
             previous_version = run(user / ".local/bin/agenticfan", "--version").stdout.strip()
@@ -72,12 +75,17 @@ def main():
         backups = list((user / "Applications").glob("AgenticFan.previous.*.app"))
         assert len(backups) == (1 if previous_dmg else 0)
         if previous_dmg:
-            assert run(backups[0] / "Contents/MacOS/agenticfan", "--version").stdout.strip() == previous_version
+            previous_cli = backups[0] / "Contents/MacOS/agenticfan"
+            if hosted_fixture:
+                assert hashlib.sha256(previous_cli.read_bytes()).digest() == old_digest
+            else:
+                assert run(previous_cli, "--version").stdout.strip() == previous_version
             assert run(binary, "--version").stdout.strip() == info["CFBundleShortVersionString"]
             for folder in (".agents", ".claude"):
                 marker = user / folder / "skills/agenticfan/installation.json"
                 assert json.loads(marker.read_text())["version"] == info["CFBundleShortVersionString"]
-            print("PASS: actual 0.4.5 app, CLI and both skills upgraded in place")
+            print("PASS: published 0.4.5 app replaced; original binary retained; new CLI and both skills installed"
+                  if hosted_fixture else "PASS: actual 0.4.5 app, CLI and both skills upgraded in place")
         run(*command, timeout=180)
         assert (user / ".zprofile").read_text() == profile
         assert list((user / "Applications").glob("AgenticFan.previous.*.app")) == backups
@@ -99,7 +107,8 @@ def main():
             (pair / 'AgenticFanControlWorker').unlink()
             (pair / 'AgenticFanControlWorker').symlink_to(executable.parent / 'AgenticFanControlWorker')
             assert subprocess.run([str(pair/'AgenticFanService'), '--verify-worker']).returncode != 0
-            if hosted_mac() and args.dmg: exercise(executable.parents[2], backups[0])
+            if hosted_mac() and args.dmg:
+                exercise(executable.parents[2], legacy_app_for_vm(work, backups[0]))
         demo_env = dict(os.environ, AGENTICFAN_DEMO_DIR=str(work / "demo"))
         demo = json.loads(run(binary, "--demo", "doctor", env=demo_env).stdout)
         assert demo["simulated"] and demo["data"]["monitoring_available"]

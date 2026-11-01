@@ -199,6 +199,18 @@ class RulesTests(unittest.TestCase):
             self.assertEqual(runner.tick(sample(), now)["status"], "disabled")
             self.assertIsNone(runner.control)
 
+    def test_disable_after_recovery_started_clears_wait_immediately(self):
+        runner = self.runner()
+        runner.tick(sample(), 0)
+        runner.control.restored = True
+        runner.control.reason = "lease_expired"
+        runner.control.exit_code = 0
+        self.assertEqual(runner.tick(sample(), 1)["status"], "recovering")
+        rules.save(self.path, config(enabled=False))
+        self.assertEqual(runner.tick(sample(), 2)["status"], "disabled")
+        self.assertIsNone(runner.control)
+        self.assertFalse(runner.recovering)
+
     def test_final_receipt_can_arrive_after_snapshot_saw_our_manual_fan(self):
         runner = self.runner()
         runner.tick(sample(), 0)

@@ -10,7 +10,7 @@ AgenticFan 常驻菜单栏，打开主窗口、关闭窗口和收起菜单栏弹
 
 ## 在 Apple Silicon Mac 构建
 
-需要 macOS 15+、arm64 Python 3.12、Xcode Command Line Tools 和可用的桌面会话。不要使用 Rosetta 下的 x86_64 Python。
+需要 macOS 15+、支持 macOS 15.0 的 arm64 Python 3.12、Xcode Command Line Tools 和可用的桌面会话。构建器检查实际嵌入的 Python 动态库的最低系统版本；在较新的 Mac 上仅设置环境变量不会让旧系统能加载它。不要使用 Rosetta 下的 x86_64 Python。
 
 ```sh
 python3 -m venv .venv
@@ -31,6 +31,8 @@ python3 -m venv .venv
 ## 内置控扇服务
 
 0.4.6 构建同时生成独立硬件 worker 和原生服务入口；先签 worker，固定其 SHA-256 后编译签名入口，加入包内 LaunchDaemon plist，最后签主 App。挂载前后校验入口与 worker 是否配对。隔离安装跳过服务注册；一次性 GitHub-hosted macOS VM 还会启动成品 root 服务、执行无硬件写入的旧 launchd 作业迁移。它不代替公证 App 经 macOS 系统设置批准的验收。
+
+0.4.5 正式包的 Python 依赖 macOS 27，不能在 macOS 15 上启动。迁移测试在 macOS 15 上分别验证：替换并完整保留原正式包的可执行文件；使用原版 v0.4.5 提交和打包定义重建可运行的旧服务，再实际迁移。可运行正式包的系统可直接用 `test_install.py --dmg 新包 --previous-dmg 旧包` 验证完整升级。
 
 ## 构建检查
 

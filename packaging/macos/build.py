@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import platform
 import plistlib
+import re
 import runpy
 import shutil
 import struct
@@ -21,6 +22,18 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def run(*args, **kwargs):
     return subprocess.run([str(arg) for arg in args], check=True, **kwargs)
+
+
+def verify_python_target(library):
+    # PyInstaller embeds this exact library in both the CLI and the root worker.
+    # Changing MACOSX_DEPLOYMENT_TARGET cannot lower a prebuilt dylib's minimum.
+    result = run("xcrun", "vtool", "-arch", "arm64", "-show-build", library,
+                 capture_output=True, text=True)
+    targets = re.findall(r"^\s*minos\s+([\d.]+)\s*$", result.stdout, re.MULTILINE)
+    if not targets or any(tuple(map(int, t.split("."))) > (15, 0, 0) for t in targets):
+        raise RuntimeError(f"Embedded Python must support macOS 15.0 (found {', '.join(targets) or 'unknown'}). "
+                           "Use a compatible arm64 Python distribution before packaging.")
+    return targets[0]
 
 
 def hook_smoke(executable: Path, directory: Path, env):
@@ -185,6 +198,8 @@ def main(argv=None):
         if not shutil.which(tool):
             parser.error(f"Required macOS build tool is missing: {tool}")
     import PyInstaller
+    from PyInstaller.depend.bindepend import get_python_library_path
+    python_minos = verify_python_target(get_python_library_path())
 
     version = runpy.run_path(str(ROOT / "agenticfan" / "__init__.py"))["__version__"]
     flavor = "" if args.notary_profile else "-signed-unnotarized" if args.identity else "-dev"
@@ -272,7 +287,7 @@ def main(argv=None):
     dmg.with_suffix(".dmg.sha256").write_text(f"{digest}  {dmg.name}\n")
     metadata = {
         "artifact": dmg.name, "version": version, "architecture": "arm64", "minimum_macos": "15.0",
-        "python": platform.python_version(), "pyinstaller": PyInstaller.__version__,
+        "python": platform.python_version(), "python_minimum_macos": python_minos, "pyinstaller": PyInstaller.__version__,
         "signing": "developer_id" if args.identity else "ad_hoc", "notarized": bool(args.notary_profile),
         "verified": ["bundled_service_digest", "isolated_service_entry", "project_license", "codesign", "hdiutil", "mounted_app", "bundled_cli", "hook_file_workflow", "temperature_curve_workflow", "demo_guardian", "demo_gui", "demo_temperature_quality", "demo_menu_bar_startup"],
         "hardware_verified": False, "sha256": digest,

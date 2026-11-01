@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reject a bundled Python runtime that cannot load on the supported macOS 15 minimum.
+
 - Bundle the permission-isolated fan service and manage registration, idle upgrades and migration from 0.4.5 with the app. Preserve the existing user grant, rules, curves and Hooks. Recover known sampling/lease interruptions after verified automatic mode and two fresh observations; leave external stops and hardware failures paused.
 
 ## 0.4.5 — 2026-11-01
