@@ -332,3 +332,15 @@ func controlArguments(fan: Fan, rpm: Int, duration: Int) throws -> [String] {
     }
     return ["fans", "set", "--fan", String(fan.id), "--rpm", String(rpm), "--duration", String(duration)]
 }
+
+enum RunnerEnd: Equatable {
+    case stopped
+    case restart
+    case needsRecovery
+}
+
+func runnerEndDecision(quitting: Bool, userStopped: Bool, exitCode: Int32, automaticModeVerified: Bool, restarts: Int) -> RunnerEnd {
+    if quitting || userStopped { return .stopped }
+    if exitCode == 7 || !automaticModeVerified || restarts >= 5 { return .needsRecovery }
+    return .restart
+}

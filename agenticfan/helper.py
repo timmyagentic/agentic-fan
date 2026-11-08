@@ -29,7 +29,7 @@ LEGACY_PLIST = Path('/Library/LaunchDaemons') / (LEGACY_LABEL + '.plist')
 SOCKET_DIRECTORY = Path('/var/run/agenticfan-control')
 SOCKET = SOCKET_DIRECTORY / 'control.sock'
 CACHE = Path('/private/var/run/agenticfan-service-runtime')
-PROTOCOL = 2
+PROTOCOL = 3
 MAX_MESSAGE = 4096
 MANAGEMENT = ('enroll', 'migrate', 'drain', 'resume', 'revoke')
 
@@ -92,15 +92,20 @@ def validate_request(request):
         if type(request.get('experimental_ftst')) is not bool:
             raise invalid('experimental_ftst must be boolean.')
     if operation == 'set':
-        fields |= {'rpm', 'duration'}
-        validate_duration(request.get('duration'))
+        fields.add('rpm')
         if type(request.get('rpm')) is not int or not 1 <= request['rpm'] <= 16383:
             raise invalid('RPM must be a positive supported integer.')
+        has_duration = 'duration' in request
+        if has_duration:
+            fields.add('duration')
+            validate_duration(request.get('duration'))
         if 'lease_seconds' in request:
             fields.add('lease_seconds')
             value = request['lease_seconds']
             if type(value) not in (int, float) or not 1 <= value <= 10:
                 raise invalid('A heartbeat lease must be finite and between 1 and 10 seconds.')
+        if not has_duration and 'lease_seconds' not in request:
+            raise invalid('A control session requires a finite duration or a heartbeat lease.')
     elif operation not in ('auto', 'status', *MANAGEMENT):
         raise invalid('Unknown control service operation.')
     if set(request) != fields:
@@ -135,7 +140,9 @@ def relay(connection, request, stopping, command=None, env=None):
     buffer = b''
     try:
         if request['operation'] == 'set':
-            config = {key: request[key] for key in ('fans', 'rpm', 'duration', 'experimental_ftst')}
+            config = {key: request[key] for key in ('fans', 'rpm', 'experimental_ftst')}
+            if 'duration' in request:
+                config['duration'] = request['duration']
             if 'lease_seconds' in request:
                 config['lease_seconds'] = request['lease_seconds']
             config['demo'] = False
@@ -195,7 +202,7 @@ def relay(connection, request, stopping, command=None, env=None):
         if not process.stdin.closed:
             process.stdin.close()
         process.stdout.close()
-        # Never kill the isolated guardian. EOF triggers its own bounded rollback.
+        # Never kill the isolated guardian. EOF or its heartbeat lease triggers rollback.
         if process.poll() is not None:
             process.wait()
 

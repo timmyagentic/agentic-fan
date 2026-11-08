@@ -101,8 +101,8 @@ MANIFEST = {
         "rules_receipts": "saved means persisted, loaded means a live runner observed this exact file generation, active/cooling means a rule requests control, and control_confirmed means observed RPM reached tolerance. rules status is stale after four seconds without a heartbeat. rules_finished automatic_mode_verified only covers outstanding writes owned by this runner, not other controllers.",
         "sensor_labels": "Additive display_name/group/group_name/label_status/label_source/label_note fields. Original id and name stay unchanged. community_mapping is chip-scoped; system_name translates IOHID Product. label_verified remains false; neither source proves physical calibration or a physical core number.",
         "temperature_overview": "Per identified group, the maximum of currently valid mapped points, with contributing IDs and value_sensor_id. Unknown and calibration rows are excluded. This is not a package sensor or an average. Missing valid data returns null.",
-        "authorization": "A bundled SMAppService daemon performs restricted fan writes. Normal installs and startup reconcile an existing opt-in; helper install explicitly enables. Only ready=true means macOS approval, per-user grant and migration are complete. Wire protocol 2 is independent of the UI binary hash. The kernel peer UID limits writes to the authorized account. No privileged Hook execution.",
-        "readback": "Mode, target and restoration readback are polled for up to 3 seconds per step. Setup counts toward the session duration. No automatic Ftst opt-in or repeated SMC writes.",
+        "authorization": "A bundled SMAppService daemon performs restricted fan writes. Normal installs and startup reconcile an existing opt-in; helper install explicitly enables. Only ready=true means macOS approval, per-user grant and migration are complete. Wire protocol 3 is independent of the UI binary hash. The kernel peer UID limits writes to the authorized account. No privileged Hook execution.",
+        "readback": "Mode, target and restoration readback are polled for up to 3 seconds per step. Setup counts toward a bounded session's duration. A rules session has no wall-clock deadline. No automatic Ftst opt-in or repeated SMC writes.",
         "temperatures": "Celsius; value is populated only for status=ok. Finite interface readings are preserved in raw_value; non-finite values use raw_non_finite. No imputation. Labels/physical locations are unverified; IOHID IDs last for this boot.",
         "sensor_status": {"ok": "Nonzero finite reading within the declared plausibility bounds, not proof of calibration, physical mapping or thermal safety.",
                           "invalid": "Reading is non-finite or outside plausibility bounds. value is null; inspect reason and raw evidence.",
@@ -167,10 +167,11 @@ MANIFEST['semantics']['temperature_curves'] = (
     'Interpolate linearly, hold endpoint RPM outside the node range, and apply ramp_rpm_per_second (default 200) '
     'in both directions, starting at current observed fan speed. curve_target_rpm is the interpolated goal; '
     'desired_rpm is the smoothed request. One bounded leased guardian session accepts sequenced RPM-only updates '
-    'without toggling automatic mode between targets. Updates do not extend its 3600-second deadline or heartbeat lease. '
+    'without toggling automatic mode between targets. The app-owned session has no wall-clock deadline; RPM updates do not extend the five-second heartbeat lease. '
+    'Manual fans set sessions remain bounded to 1..3600 seconds and are not extended by retargeting. '
     'Confirmation is tied to the exact update sequence; moving targets cannot reset the 15-second tracking failure timer. '
     'Known sample_timeout, lease_expired or observation_gap interruptions enter recovering only after verified auto and require two consecutive fresh readings. Unknown stops and unverified restore remain paused. last_interruption and pause_code expose the reason. '
-    'Missing/stale temperature, invalid config, stop or expiry releases owned control. External auto pauses until explicit reapply. '
+    'Missing/stale temperature, invalid config or stop releases owned control. External auto pauses until explicit reapply. '
     'Curve mode retains threshold rules and Hook settings but does not evaluate rules or submit threshold Hook events. '
     'No configured mode defaults to legacy rules; enabled=false disables either mode. No curve is enabled implicitly.'
 )

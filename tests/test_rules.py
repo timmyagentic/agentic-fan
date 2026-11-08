@@ -345,5 +345,11 @@ class RulesTransportTests(unittest.TestCase):
             process.communicate()
 
 
+class LeasedControlParameterTests(unittest.TestCase):
+    def test_rule_control_has_no_wall_clock_duration(self):
+        parameters = rules.leased_control_parameters(0, 1800)
+        self.assertEqual(parameters, {"fans": [0], "rpm": 1800, "experimental_ftst": False, "lease_seconds": 5})
+
+
 if __name__ == "__main__":
     unittest.main()
