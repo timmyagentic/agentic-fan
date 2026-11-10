@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Validate wire protocol 3 in the packaged service smoke check so the leased-control app can complete DMG build and installation verification.
 - Keep an enabled temperature curve or threshold rule in control for the life of the running app. Rule sessions use the heartbeat lease and no longer expire after 3600 seconds or pause when a readback crosses that deadline. Manual `fans set` stays limited to 1–3600 seconds. The menu bar restarts a rules runner that exits after verified automatic mode, and stops retrying when restoration is unverified.
 - Let the website fill the browser width and adapt its opening layout to the available height, including wide monitors and phone orientations.
 - Download the current stable Apple Silicon DMG from the website and show fan-equipped Mac compatibility before installation.
