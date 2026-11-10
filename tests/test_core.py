@@ -9,7 +9,7 @@ from unittest.mock import patch
 from agenticfan.codecs import KeyInfo, decode, encode_rpm, key_number
 from agenticfan.demo import MemorySMC, fixture
 from agenticfan.errors import AgenticFanError, MissingKey
-from agenticfan.guardian import run_session, validate_duration
+from agenticfan.guardian import run_session, session_duration, validate_duration
 from agenticfan.hardware import Hardware
 from agenticfan.runtime import lock, runtime_directory
 from agenticfan.smc import SMCData
@@ -316,6 +316,71 @@ class SessionTests(unittest.TestCase):
         for value in (0, -1, 3601, math.inf, math.nan, True):
             with self.assertRaises(AgenticFanError):
                 validate_duration(value)
+
+    def test_open_session_requires_a_lease(self):
+        self.assertIsNone(session_duration({"lease_seconds": 5, "duration": None}))
+        self.assertEqual(session_duration({"duration": 2, "lease_seconds": 5}), 2)
+        for config in ({}, {"duration": None}, {"lease_seconds": None}):
+            with self.assertRaises(AgenticFanError):
+                session_duration(config)
+
+    def test_leased_session_has_no_hour_cap_and_ignores_wall_clock_jumps(self):
+        wall = FakeClock()
+        mono = FakeClock()
+        seen = []
+
+        def wait(delay):
+            step = delay or 0
+            mono.time += step
+            wall.time += step
+            if mono.time >= 1 and not seen:
+                wall.time += 7200
+                seen.append(self.hw.mode(0))
+            if mono.time >= 4:
+                return "cancelled"
+            return False
+
+        run_session(self.hw, Path(self.temp.name), [0], 3000, None, False, self.events.append,
+                    wait, mono.now, wall.now)
+        self.assertEqual(seen, ["manual"])
+        self.assertGreater(wall.time, 7200)
+        self.assertLess(mono.time, 10)
+        self.assertEqual(self.events[0]["data"]["duration_seconds"], None)
+        self.assertIsNone(self.events[0]["data"]["expires_at"])
+        self.assertEqual(self.events[-1]["data"]["reason"], "cancelled")
+        self.assertTrue(self.events[-1]["data"]["automatic_mode_verified"])
+        self.assertEqual(self.hw.mode(0), "auto")
+
+    def test_deadline_during_readback_finishes_as_expiry(self):
+        phase = {"manual": False}
+        real_set = self.hw._set_mode
+        real_mode = self.hw.mode
+        reads = {"n": 0}
+
+        def set_mode(index, manual):
+            real_set(index, manual)
+            phase["manual"] = bool(manual)
+        self.hw._set_mode = set_mode
+
+        def mode(index, key=None):
+            if phase["manual"]:
+                reads["n"] += 1
+                if reads["n"] < 2:
+                    return "auto"
+            return real_mode(index, key)
+        self.hw.mode = mode
+
+        def wait(delay):
+            if phase["manual"]:
+                self.clock.time = 5
+            return False
+
+        run_session(self.hw, Path(self.temp.name), [0], 3000, 2, False, self.events.append,
+                    wait, self.clock.now, self.clock.now)
+        self.assertEqual([event["event"] for event in self.events], ["control_finished"])
+        self.assertEqual(self.events[-1]["data"]["reason"], "expired")
+        self.assertTrue(self.events[-1]["data"]["automatic_mode_verified"])
+        self.assertEqual(real_mode(0), "auto")
 
 
 if __name__ == "__main__":

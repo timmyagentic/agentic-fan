@@ -29,9 +29,22 @@ def validate_duration(duration):
         raise invalid("Duration must be finite and between 1 and 3600 seconds.")
 
 
+def session_duration(config):
+    """Bounded sessions carry duration. Rule sessions carry only a heartbeat lease."""
+    if not isinstance(config, dict):
+        raise invalid("Control configuration must be an object.")
+    present = "duration" in config and config["duration"] is not None
+    if present:
+        validate_duration(config["duration"])
+    if not present and config.get("lease_seconds") is None:
+        raise invalid("A control session requires a finite duration or a heartbeat lease.")
+    return config["duration"] if present else None
+
+
 def run_session(hw: Hardware, directory, indices, rpm, duration, experimental_ftst, output,
                 wait_stop, monotonic=time.monotonic, wall_clock=time.time, target_update=None):
-    validate_duration(duration)
+    if duration is not None:
+        validate_duration(duration)
     if not isinstance(rpm, int) or isinstance(rpm, bool):
         raise invalid("RPM must be an integer.")
     if not isinstance(indices, list) or not all(isinstance(i, int) and not isinstance(i, bool) for i in indices):
@@ -55,28 +68,32 @@ def run_session(hw: Hardware, directory, indices, rpm, duration, experimental_ft
                 start = monotonic()
                 start_wall = wall_clock()
                 unconfirmed_since = start
+                def elapsed():
+                    return monotonic() - start
                 def wait_apply(delay):
-                    elapsed = max(monotonic() - start, wall_clock() - start_wall)
-                    if elapsed >= duration:
-                        raise AgenticFanError("CONTROL_NOT_CONFIRMED", "Session expired while waiting for hardware readback.")
-                    stop = wait_stop(min(delay, duration - elapsed))
+                    # A bounded deadline crossed during readback is expiry, not a
+                    # failed RPM confirmation. Leased sessions have no wall deadline.
+                    if duration is not None and elapsed() >= duration:
+                        raise StopDuringReadback("expired")
+                    timeout = delay if duration is None else min(delay, max(0, duration - elapsed()))
+                    stop = wait_stop(timeout)
                     if stop:
                         raise StopDuringReadback(stop if isinstance(stop, str) else "cancelled")
                 armed = True
                 hw.apply(indices, rpm, experimental_ftst, wait=wait_apply)
-            last_mono, last_wall = monotonic(), wall_clock()
+            last_mono = monotonic()
             next_sample = last_mono
+            expires_at = None if duration is None else datetime.fromtimestamp(start_wall + duration, timezone.utc).isoformat()
             output(success({"fans": indices, "target_rpm": rpm, "duration_seconds": duration,
-                            "expires_at": datetime.fromtimestamp(start_wall + duration, timezone.utc).isoformat(),
+                            "expires_at": expires_at,
                             "guardian_pid": os.getpid(), "status": "target_written", "sequence": sequence,
                             "experimental_ftst": experimental_ftst}, hw.simulated, "control_started"))
             while True:
                 current, current_wall = monotonic(), wall_clock()
-                elapsed = max(current - start, current_wall - start_wall)
-                if current - last_mono > 3 or abs(current_wall - last_wall) > 3:
+                if current - last_mono > 3:
                     reason = "observation_gap"
                     break
-                last_mono, last_wall = current, current_wall
+                last_mono = current
                 if current >= next_sample:
                     sampled_at = datetime.fromtimestamp(current_wall, timezone.utc).isoformat()
                     modes = [hw.mode(i) for i in indices]
@@ -105,7 +122,7 @@ def run_session(hw: Hardware, directory, indices, rpm, duration, experimental_ft
                         unconfirmed_since = current
                     confirmed = within_target
                     updated = target_update() if target_update is not None else None
-                    if updated is not None and elapsed < duration:
+                    if updated is not None and (duration is None or elapsed() < duration):
                         validate_update(updated)
                         if updated['sequence'] <= sequence:
                             raise invalid('Control update sequences must increase.')
@@ -115,12 +132,14 @@ def run_session(hw: Hardware, directory, indices, rpm, duration, experimental_ft
                         rpm, sequence, confirmed = updated['rpm'], updated['sequence'], False
                         output(success({"fans": indices, "target_rpm": rpm, "sequence": sequence}, hw.simulated, "control_target_updated"))
                     next_sample = current + 1
-                if unconfirmed_since is not None and current - unconfirmed_since >= min(15, duration):
+                mismatch_limit = 15 if duration is None else min(15, duration)
+                if unconfirmed_since is not None and current - unconfirmed_since >= mismatch_limit:
                     raise AgenticFanError("CONTROL_NOT_CONFIRMED", "Actual RPM did not reach the target tolerance before the confirmation deadline.",
                                       target_rpm=rpm, tolerance_rpm=max(100, rpm * 0.08))
-                if elapsed >= duration:
+                if duration is not None and elapsed() >= duration:
                     break
-                stop = wait_stop(min(0.25, duration - elapsed))
+                remaining = None if duration is None else max(0, duration - elapsed())
+                stop = wait_stop(0.25 if remaining is None else min(0.25, remaining))
                 if stop:
                     reason = stop if isinstance(stop, str) else "cancelled"
                     break
@@ -255,7 +274,7 @@ def main():
             hw = demo_hardware()
         else:
             hw = native_hardware(include_temperatures=False)
-        run_session(hw, runtime_directory(demo), config["fans"], config["rpm"], config["duration"],
+        run_session(hw, runtime_directory(demo), config["fans"], config["rpm"], session_duration(config),
                     config["experimental_ftst"], output, wait_stop,
                     target_update=updates.take_target if lease_seconds is not None else None)
         return 0

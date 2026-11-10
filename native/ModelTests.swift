@@ -12,6 +12,13 @@ struct ModelTests {
             do { _ = try controlArguments(fan: fan, rpm: rpm, duration: duration); fatalError("Accepted invalid control") }
             catch { }
         }
+        assert(runnerEndDecision(quitting: true, userStopped: false, exitCode: 0, automaticModeVerified: true, restarts: 0) == .stopped)
+        assert(runnerEndDecision(quitting: false, userStopped: true, exitCode: 0, automaticModeVerified: true, restarts: 0) == .stopped)
+        assert(runnerEndDecision(quitting: false, userStopped: false, exitCode: 0, automaticModeVerified: true, restarts: 0) == .restart)
+        assert(runnerEndDecision(quitting: false, userStopped: false, exitCode: 5, automaticModeVerified: true, restarts: 4) == .restart)
+        assert(runnerEndDecision(quitting: false, userStopped: false, exitCode: 7, automaticModeVerified: true, restarts: 0) == .needsRecovery)
+        assert(runnerEndDecision(quitting: false, userStopped: false, exitCode: 0, automaticModeVerified: false, restarts: 0) == .needsRecovery)
+        assert(runnerEndDecision(quitting: false, userStopped: false, exitCode: 0, automaticModeVerified: true, restarts: 5) == .needsRecovery)
         for status in ["invalid", "unverified", "unavailable"] {
             let bytes = Data("{\"id\":\"smc:TEST\",\"name\":\"TEST\",\"value\":92.0,\"raw_value\":92.0,\"status\":\"\(status)\",\"source\":\"smc\"}".utf8)
             let sensor = try decoder.decode(Sensor.self, from: bytes)

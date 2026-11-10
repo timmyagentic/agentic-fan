@@ -91,14 +91,14 @@ class MigrationAndAccessTests(unittest.TestCase):
         self.assertFalse(self.config.exists())
         a,b = socket.socketpair(); self.addCleanup(a.close)
         with patch.object(helper,'peer_uid',return_value=501), patch.object(access.pwd,'getpwuid'), patch.object(access,'verify_form') as verify:
-            helper.send(a, {'protocol':2,'operation':'enroll','authorization':form})
+            helper.send(a, {'protocol':helper.PROTOCOL,'operation':'enroll','authorization':form})
             helper.handle(b, manager, threading.Event())
             self.assertEqual(json.loads(a.makefile().readline())['data']['state'],'ready')
             verify.assert_called_once_with(form)
         self.assertEqual(json.loads(self.config.read_text()), {'authorized_uid':501})
         self.assertNotIn(form,self.config.read_text())
         with self.assertRaises(AgenticFanError): manager.manage(502, {'operation':'enroll','authorization':form})
-        with self.assertRaises(AgenticFanError): helper.validate_request({'protocol':2,'operation':'enroll','authorization':form,'uid':501})
+        with self.assertRaises(AgenticFanError): helper.validate_request({'protocol':helper.PROTOCOL,'operation':'enroll','authorization':form,'uid':501})
 
     def test_active_session_blocks_revoke_and_drain_cannot_strand_service_forever(self):
         self.config.write_text('{"authorized_uid":501}'); manager = access.ServiceAccess()

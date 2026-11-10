@@ -41,6 +41,8 @@ final class Monitor: ObservableObject {
     private var rulesCommand: Command?
     private var runnerFinished: Bool?
     private var runnerError: String?
+    private var runnerStartedAt = Date()
+    private var runnerRestarts = 0
     private var lastRulesError: String?
     private var stopRulesCompletion: ((Bool) -> Void)?
     private var smokeStarted = false
@@ -93,6 +95,7 @@ final class Monitor: ObservableObject {
         }
         error = nil
         runnerFinished = nil; runnerError = nil
+        runnerStartedAt = Date()
         let task = Command(ruleArguments("run", ["--parent-watch"]), keepInputOpen: true)
         watch = task
         do {
@@ -139,8 +142,24 @@ final class Monitor: ObservableObject {
                     stopRulesCompletion = nil; rulesStopping = false
                     if !restored { rulesRecoveryRequired = true; error = runnerError ?? "规则运行器未确认恢复自动模式，应用保持运行。" }
                     completion(restored)
-                } else if !quitting {
+                    return
+                }
+                if Date().timeIntervalSince(runnerStartedAt) >= 30 { runnerRestarts = 0 }
+                switch runnerEndDecision(quitting: quitting, userStopped: false, exitCode: code,
+                                         automaticModeVerified: runnerFinished == true, restarts: runnerRestarts) {
+                case .stopped:
+                    break
+                case .needsRecovery:
+                    rulesRecoveryRequired = true
                     error = runnerError ?? "监测已停止（\(code)）。请重试连接。"
+                case .restart:
+                    let attempt = runnerRestarts
+                    runnerRestarts += 1
+                    let delay = min(8.0, pow(2.0, Double(attempt)))
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                        guard let self, self.watch == nil, !self.quitting, self.stopRulesCompletion == nil else { return }
+                        self.start()
+                    }
                 }
             })
         } catch { watch = nil; self.error = error.localizedDescription; status = "连接失败" }

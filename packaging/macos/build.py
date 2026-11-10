@@ -113,7 +113,7 @@ def smoke(executable: Path, directory: Path, gui=True):
         env.pop(key, None)
     run(executable.parent / "AgenticFanService", "--verify-worker", cwd=directory, env=env, timeout=15)
     service = json.loads(run(executable.parent / "AgenticFanControlWorker", "--service-info", cwd=directory, env=env, capture_output=True, text=True, timeout=20).stdout)
-    assert service["protocol"] == 2
+    assert service["protocol"] == 3
     for arguments in (
         ["schema"], ["--demo", "snapshot"],
         ["--demo", "fans", "set", "--fan", "all", "--rpm", "3000", "--duration", "1"],

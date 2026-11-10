@@ -13,7 +13,7 @@ from agenticfan.errors import AgenticFanError
 
 
 def request(operation='set', **changes):
-    data = {'protocol': 2, 'operation': operation}
+    data = {'protocol': helper.PROTOCOL, 'operation': operation}
     if operation in ('set', 'auto'):
         data.update(fans=[0], experimental_ftst=False)
     if operation == 'set':
@@ -35,10 +35,17 @@ class HelperProtocolTests(unittest.TestCase):
     def test_rules_lease_is_bounded_and_optional(self):
         helper.validate_request(request(lease_seconds=5))
         helper.validate_request(request())
+        leased = request(lease_seconds=5)
+        leased.pop('duration')
+        helper.validate_request(leased)
+        bare = request()
+        bare.pop('duration')
+        with self.assertRaises(AgenticFanError):
+            helper.validate_request(bare)
 
     def test_protocol_not_product_binary_is_the_compatibility_boundary(self):
         helper.validate_request(request())
-        for bad in (request(protocol=1), request(version='0.4.5'), request(build='/bin/sh')):
+        for bad in (request(protocol=1), request(protocol=2), request(version='0.4.5'), request(build='/bin/sh')):
             with self.assertRaises(AgenticFanError):
                 helper.validate_request(bad)
 

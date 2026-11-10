@@ -302,6 +302,11 @@ class Evaluator:
                 "readings_available": not enabled or any(readings.get(rule["sensor_group"]) is not None for rule in enabled)}
 
 
+def leased_control_parameters(fan, rpm):
+    """App-owned control lives with the runner. The heartbeat lease is its deadline."""
+    return {"fans": [fan], "rpm": rpm, "experimental_ftst": False, "lease_seconds": 5}
+
+
 class Control:
     """One observed guardian connection, never an orphaned CLI subprocess."""
     def __init__(self, fan, rpm, demo):
@@ -332,14 +337,13 @@ class Control:
                     if self.cancelled.wait(delay):
                         return "cancelled"
                     return False if self.heartbeat_alive() else "sample_timeout"
-                run_session(hw, runtime_directory(True), [self.fan], self.initial_rpm, 3600, False,
+                run_session(hw, runtime_directory(True), [self.fan], self.initial_rpm, None, False,
                             self.messages.put, wait_stop, target_update=self.take_target)
             else:
                 from .helper import request
-                code = request("set", fans=[self.fan], rpm=self.initial_rpm, duration=3600,
-                               experimental_ftst=False, lease_seconds=5, output=self.messages.put,
-                               cancel_event=self.cancelled, heartbeat=self.heartbeat_alive,
-                               target_update=self.take_target)
+                code = request("set", **leased_control_parameters(self.fan, self.initial_rpm),
+                               output=self.messages.put, cancel_event=self.cancelled,
+                               heartbeat=self.heartbeat_alive, target_update=self.take_target)
         except Exception as exc:
             error = exc if isinstance(exc, AgenticFanError) else AgenticFanError("RULE_CONTROL_ERROR", str(exc))
             self.messages.put(failure(error, self.demo))
