@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Inspect the menu and fan settings at full size with keyboard navigation on the product website.
+
 ## 0.4.7 — 2026-11-15
 
 - Validate wire protocol 3 in the packaged service smoke check so the leased-control app can complete DMG build and installation verification.

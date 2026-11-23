@@ -94,3 +94,15 @@
 
 /* Media fits the allocated track without contributing its native pixel dimensions. */
 .viewport-home .native-preview > a { contain: size; width: 100%; }
+
+/* Keep the product evidence and its full-size views together. */
+.viewport-home.brand-fan .hero h1 span { color: #305754; }
+.viewport-home.brand-fan .hero .product-visual { position: relative; background: #e5eee8; border-color: transparent; box-shadow: none; border-radius: 16px; }
+.viewport-home.brand-fan .case-study { grid-template-rows: auto minmax(min(94px,14vh),1fr) auto auto; }
+.viewport-home .screen-choices { display:flex; align-items:center; justify-content:center; gap:4px; padding:3px; width:fit-content; max-width:100%; margin:0 auto; background:#fff; border:1px solid color-mix(in srgb, #2d5b57 28%, white); border-radius:10px; }
+.viewport-home .screen-choices a { display:inline-flex; align-items:center; justify-content:center; min-height:36px; padding:4px 12px; color:#2d5b57; font-weight:650; font-size:14px; line-height:1.35; text-decoration:none; border-radius:7px; }
+.viewport-home .screen-choices a:is(:hover,:focus-visible) { background:#e5eee8; }
+@media (max-width:700px) {
+  .viewport-home .screen-choices a { min-height:44px; }
+  .viewport-home .hero .product-visual { height:auto; min-height:0; }
+}
