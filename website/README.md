@@ -1,8 +1,10 @@
 # AgenticFan website
 
+Source for the React and HeroUI interface lives in `interface/`. Run `npm ci && npm run build` there after editing components. Commit the generated HTML and local assets with their source.
+
 Public product site: https://agenticfan.timmyagentic.si
 
-Buildless HTML, CSS and JavaScript. All assets are local; product illustrations use explicitly labeled sample data. The site never connects to a visitor's hardware, router or ledger.
+The published HTML, CSS and JavaScript deploy directly. All assets are local; product illustrations use explicitly labeled sample data. The site never connects to a visitor's hardware, router or ledger.
 
 ## Local verification
 
