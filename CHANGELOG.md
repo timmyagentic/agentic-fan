@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Rebuild the website around interactive sensor and control views, keyboard navigation, installation guidance, and an accessible FAQ.
+
 - Inspect the menu and fan settings at full size with keyboard navigation on the product website.
 
 ## 0.4.7 — 2026-11-15

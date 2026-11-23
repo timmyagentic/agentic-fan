@@ -1,0 +1,4 @@
+{
+  "prompt": "请按 https://github.com/timmyagentic/agentic-fan/blob/codex/apple-silicon-dmg/INSTALL.md 安装最新正式版 AgenticFan App、CLI 和当前 Agent 的 skill，保留已有配置，最后只读检查真实温度和风扇接口，并报告版本、安装路径与未完成项。",
+  "commands": "agenticfan doctor\nagenticfan snapshot\nagenticfan watch --interval 1 --count 10"
+}
