@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The website shows the menu-bar sample and fan speed alongside the temperature and rule views.
+
 - Rebuild the website around interactive sensor and control views, keyboard navigation, installation guidance, and an accessible FAQ.
 
 - Inspect the menu and fan settings at full size with keyboard navigation on the product website.
