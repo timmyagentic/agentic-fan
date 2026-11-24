@@ -1,13 +1,6 @@
 import React, { useState } from "react";
-import {
-  Fan,
-  Thermometer,
-  LayoutDashboard,
-  AppWindow,
-  Download,
-  Terminal,
-} from "lucide-react";
-import { Action, Choices, Figure, HeroCopy, Mark } from "./ui.jsx";
+import { LayoutDashboard, AppWindow, Download, Terminal } from "lucide-react";
+import { Action, Choices, Figure } from "./ui.jsx";
 export const site = {
   name: "AgenticFan",
   lang: "zh",
@@ -41,46 +34,38 @@ const views = [
 export function Hero() {
   const [view, setView] = useState("menu");
   return (
-    <section className="pi-hero fan-hero">
-      <div className="pi-container pi-split">
-        <HeroCopy
-          mark={<Mark Icon={Fan}>Apple Silicon · macOS 15+</Mark>}
-          title={
-            <>
-              看懂 Mac 的温度。
-              <br />
-              掌握风扇转速。
-            </>
-          }
-          description="从菜单栏读传感器，在应用里设置有时限的控扇规则，也可以通过 CLI 查看同一组读数。"
-        >
-          <div className="pi-actions">
-            <Action href="/download" icon={Download}>
-              下载最新 DMG
-            </Action>
-            <Action href="#start" tone="ghost" icon={Terminal}>
-              用 Agent 安装
-            </Action>
+    <section className="pi-hero fan-hero" aria-labelledby="hero-title">
+      <div className="pi-container">
+        <div className="fan-product-line">
+          <h1 id="hero-title">AgenticFan</h1>
+          <Action href="/download" icon={Download}>
+            下载最新 DMG
+          </Action>
+        </div>
+        <div className="fan-instrument">
+          <div className="fan-readout">
+            <p className="fan-caption">菜单栏示例 · 风扇转速</p>
+            <p className="fan-speed">
+              1800 <span>RPM</span>
+            </p>
+            <h2>Mac 温度与风扇控制</h2>
+            <p>在菜单栏读温度和转速。需要手动控扇时，为规则设置有效时间。</p>
+            <a href="#start">
+              安装与设置 <Terminal size={15} />
+            </a>
+            <small>macOS 15+ · 配有风扇的 Apple Silicon Mac</small>
           </div>
-          <p className="fan-compat">适用于配有风扇的 Apple Silicon Mac</p>
-        </HeroCopy>
-        <section className="fan-console" aria-label="原生控扇界面">
-          <div className="fan-console-head">
-            <span>
-              <Thermometer size={20} />
-              传感器与控扇
-            </span>
-            <small>应用演示数据</small>
+          <div className="fan-screen" data-view={view}>
+            <Choices
+              label="查看原生界面"
+              tabs={views}
+              value={view}
+              onChange={setView}
+            >
+              {(item) => <Figure {...item} title={item.label} priority />}
+            </Choices>
           </div>
-          <Choices
-            label="查看原生界面"
-            tabs={views}
-            value={view}
-            onChange={setView}
-          >
-            {(item) => <Figure {...item} title={item.label} priority />}
-          </Choices>
-        </section>
+        </div>
       </div>
     </section>
   );
