@@ -2,8 +2,6 @@
 
 ## Unreleased
 
-- Show a sample fan reading beside the native menu and make the compatible Mac download easy to find.
-
 - Restore the original website layout and keep the existing installation prompt available to keyboard users.
 
 
