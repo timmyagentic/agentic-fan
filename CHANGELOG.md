@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Move official website maintenance and deployment to the shared websites repository.
+
 - Restore the original website layout and keep the existing installation prompt available to keyboard users.
 
 
