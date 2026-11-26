@@ -156,4 +156,4 @@ python3 -m agenticfan --gui --demo
 
 本项目源码采用 [MIT License](LICENSE)。
 
-第三方代码保留原有版权与许可声明，详见 [第三方声明](agenticfan/THIRD_PARTY_NOTICES.md)。网站字体遵循各自的 [SIL Open Font License](website/public/brand/fonts/)。
+第三方代码保留原有版权与许可声明，详见 [第三方声明](agenticfan/THIRD_PARTY_NOTICES.md)。网站字体遵循各自的 [SIL Open Font License](https://agenticfan.timmyagentic.si/brand/fonts/INSTRUMENT-SANS-LICENSE.txt)。
